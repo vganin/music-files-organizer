@@ -1,0 +1,8 @@
+[package]
+name = "orgtag"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "3.1.1", features = ["derive"] }
+id3 = "1.0.2"

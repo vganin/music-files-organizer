@@ -23,6 +23,9 @@ struct Args {
 
     #[clap(short, long)]
     discogs_token: String,
+
+    #[clap(short, long)]
+    clean: bool,
 }
 
 struct MusicFile {
@@ -39,6 +42,11 @@ fn main() {
 
     if !metadata(&args.output_file_path).unwrap().is_dir() {
         panic!("Output path is not directory")
+    }
+
+    if args.clean {
+        fs::remove_dir_all(&args.output_file_path).unwrap();
+        fs::create_dir(&args.output_file_path).unwrap();
     }
 
     let music_files = inspect_path(&args.input_file_path);

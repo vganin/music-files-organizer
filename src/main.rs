@@ -1,4 +1,5 @@
 use std::{fs, io};
+use std::ffi::OsStr;
 use std::fs::metadata;
 use std::io::Seek;
 use std::path::Path;
@@ -7,7 +8,7 @@ use std::path::PathBuf;
 use clap::Parser;
 use id3::{Tag, TagLike, Timestamp, v1, Version};
 use reqwest::{blocking, Url};
-use reqwest::header::{AUTHORIZATION, USER_AGENT};
+use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, USER_AGENT};
 
 static USER_AGENT_VALUE: &str = "orgtag";
 
@@ -83,8 +84,31 @@ fn main() {
             v1::Tag::remove(&mut file).unwrap();
         }
 
-        let improved_tag = improved_tag(&tag, &http_client, &args.discogs_token);
+        let (improved_tag, image_uri) = discogs_tag_and_image_uri(&tag, &http_client, &args.discogs_token);
         improved_tag.write_to_path(&target_path, Version::Id3v24).unwrap();
+
+        if let Some(uri) = image_uri {
+            let mut response = http_client.get(&uri)
+                .header(USER_AGENT, USER_AGENT_VALUE)
+                .header(AUTHORIZATION, &args.discogs_token)
+                .send()
+                .unwrap();
+
+            let extension = match response.headers().get(CONTENT_TYPE).unwrap().to_str().unwrap() {
+                "image/jpeg" => "jpg",
+                "image/png" => "png",
+                _ => panic!()
+            };
+
+            let cover_path = target_path.parent().unwrap()
+                .join("cover").with_extension(OsStr::new(extension));
+
+            println!("Will use {} as a cover: {}", &uri, cover_path.display());
+
+            response
+                .copy_to(&mut std::fs::File::create(&cover_path).unwrap())
+                .unwrap();
+        }
     }
 }
 
@@ -123,7 +147,7 @@ fn inspect_file(path: impl AsRef<Path>) -> Option<MusicFile> {
     }
 }
 
-fn improved_tag(tag: &Tag, http_client: &blocking::Client, token: &str) -> Tag {
+fn discogs_tag_and_image_uri(original_tag: &Tag, http_client: &blocking::Client, token: &str) -> (Tag, Option<String>) {
     let base_url = Url::parse("https://api.discogs.com/").unwrap();
     let auth_value = format!("Discogs token={}", token);
 
@@ -131,8 +155,8 @@ fn improved_tag(tag: &Tag, http_client: &blocking::Client, token: &str) -> Tag {
         .get(
             Url::parse_with_params(base_url.join("database/search").unwrap().as_str(), &[
                 ("type", "release"),
-                ("artist", tag.artist().unwrap()),
-                ("release_title", tag.album().unwrap()),
+                ("artist", original_tag.artist().unwrap()),
+                ("release_title", original_tag.album().unwrap()),
             ]).unwrap()
         )
         .header(USER_AGENT, USER_AGENT_VALUE)
@@ -153,7 +177,7 @@ fn improved_tag(tag: &Tag, http_client: &blocking::Client, token: &str) -> Tag {
         .unwrap()
         .clone();
 
-    let track_number = tag.track().unwrap();
+    let track_number = original_tag.track().unwrap();
     let track_index = (track_number as usize) - 1;
     let track_object = &release_object["tracklist"][track_index];
     let artists = release_object["artists"].as_array().unwrap();
@@ -175,5 +199,10 @@ fn improved_tag(tag: &Tag, http_client: &blocking::Client, token: &str) -> Tag {
     new_tag.set_genre(release_object["styles"].as_array().unwrap()
         .iter().map(|v| v.as_str().unwrap()).collect::<Vec<&str>>().join("; "));
 
-    new_tag
+    let primary_image_uri = release_object["images"].as_array().unwrap().iter()
+        .find(|v| v["type"].as_str().unwrap() == "primary")
+        .map(|v| v["uri"].as_str().unwrap().to_string())
+        .clone();
+
+    (new_tag, primary_image_uri)
 }

@@ -1,6 +1,8 @@
 use std::{fs, io};
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::metadata;
+use std::hash::Hash;
 use std::io::Seek;
 use std::path::Path;
 use std::path::PathBuf;
@@ -8,9 +10,7 @@ use std::path::PathBuf;
 use clap::Parser;
 use id3::{Tag, TagLike, Timestamp, v1, Version};
 use reqwest::{blocking, Url};
-use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, USER_AGENT};
-
-static USER_AGENT_VALUE: &str = "orgtag";
+use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -33,6 +33,16 @@ struct MusicFile {
     tag: Tag,
 }
 
+struct DiscogsReleaseInfo {
+    json: serde_json::Value,
+}
+
+#[derive(Hash, PartialEq, Eq)]
+struct ReleaseKey {
+    artist: String,
+    album: String,
+}
+
 fn main() {
     let args = Args::parse();
 
@@ -49,75 +59,15 @@ fn main() {
         fs::create_dir(&args.output_file_path).unwrap();
     }
 
-    let music_files = inspect_path(&args.input_file_path);
-
     let http_client = blocking::Client::new();
+    let headers = common_headers(&args.discogs_token);
 
-    for music_file in music_files {
-        let source_path = music_file.file_path;
-        let tag = music_file.tag;
-        let extension = source_path.extension().unwrap().to_str().unwrap();
+    let source_music_files = inspect_path(&args.input_file_path);
+    let discogs_releases = fetch_discogs_releases(&http_client, &headers, &source_music_files);
+    let target_music_files = calculate_target_files(&source_music_files, &discogs_releases, &args.output_file_path);
 
-        let mut target_path = PathBuf::from(&args.output_file_path);
-        target_path.push(tag.artist().unwrap());
-        target_path.push(format!("({}) {}", tag.year().unwrap(), tag.album().unwrap()));
-        match tag.disc() {
-            Some(disc) => target_path.push(format!(
-                "{disc:02}.{track:02}. {title}.{ext}",
-                disc = disc,
-                track = tag.track().unwrap(),
-                title = tag.title().unwrap(),
-                ext = extension,
-            )),
-            None => target_path.push(format!(
-                "{track:02}. {title}.{ext}",
-                track = tag.track().unwrap(),
-                title = tag.title().unwrap(),
-                ext = extension,
-            )),
-        }
-
-        println!("Will copy \"{}\" to \"{}\"", source_path.display(), target_path.display());
-
-        fs::create_dir_all(target_path.parent().unwrap()).unwrap();
-        fs::copy(&source_path, &target_path).unwrap();
-
-        {
-            let mut file = fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(&target_path)
-                .unwrap();
-            file.seek(io::SeekFrom::Start(0)).unwrap();
-            v1::Tag::remove(&mut file).unwrap();
-        }
-
-        let (improved_tag, image_uri) = discogs_tag_and_image_uri(&tag, &http_client, &args.discogs_token);
-        improved_tag.write_to_path(&target_path, Version::Id3v24).unwrap();
-
-        if let Some(uri) = image_uri {
-            let mut response = http_client.get(&uri)
-                .header(USER_AGENT, USER_AGENT_VALUE)
-                .header(AUTHORIZATION, &args.discogs_token)
-                .send()
-                .unwrap();
-
-            let extension = match response.headers().get(CONTENT_TYPE).unwrap().to_str().unwrap() {
-                "image/jpeg" => "jpg",
-                "image/png" => "png",
-                _ => panic!()
-            };
-
-            let cover_path = target_path.parent().unwrap()
-                .join("cover").with_extension(OsStr::new(extension));
-
-            println!("Will use {} as a cover: {}", &uri, cover_path.display());
-
-            response
-                .copy_to(&mut std::fs::File::create(&cover_path).unwrap())
-                .unwrap();
-        }
-    }
+    write_music_files(&source_music_files, &target_music_files);
+    download_covers(&http_client, &headers, &target_music_files, &discogs_releases);
 }
 
 fn inspect_path(path: impl AsRef<Path>) -> Vec<MusicFile> {
@@ -155,47 +105,175 @@ fn inspect_file(path: impl AsRef<Path>) -> Option<MusicFile> {
     }
 }
 
-fn discogs_tag_and_image_uri(original_tag: &Tag, http_client: &blocking::Client, token: &str) -> (Tag, Option<String>) {
-    let base_url = Url::parse("https://api.discogs.com/").unwrap();
-    let auth_value = format!("Discogs token={}", token);
+fn fetch_discogs_releases(
+    http_client: &blocking::Client,
+    headers: &HeaderMap,
+    music_files: &Vec<MusicFile>,
+) -> HashMap<ReleaseKey, DiscogsReleaseInfo> {
+    let mut result: HashMap<ReleaseKey, DiscogsReleaseInfo> = HashMap::new();
+
+    for music_file in music_files {
+        let release_key = release_key(music_file);
+        if !result.contains_key(&release_key) {
+            let discogs_release_info = fetch_discogs_release(http_client, headers, &release_key);
+            result.insert(release_key, discogs_release_info);
+        }
+    }
+
+    result
+}
+
+fn fetch_discogs_release(
+    http_client: &blocking::Client,
+    headers: &HeaderMap,
+    release_key: &ReleaseKey,
+) -> DiscogsReleaseInfo {
+    println!("Searching Discogs about {} - {}...", release_key.artist, release_key.album);
+
+    let search_url = Url::parse_with_params("https://api.discogs.com/database/search", &[
+        ("type", "release"),
+        ("artist", release_key.artist.as_str()),
+        ("release_title", release_key.album.as_str()),
+    ]).unwrap();
+
+    println!("Fetching {}", search_url);
 
     let search_object = http_client
-        .get(
-            Url::parse_with_params(base_url.join("database/search").unwrap().as_str(), &[
-                ("type", "release"),
-                ("artist", original_tag.artist().unwrap()),
-                ("release_title", original_tag.album().unwrap()),
-            ]).unwrap()
-        )
-        .header(USER_AGENT, USER_AGENT_VALUE)
-        .header(AUTHORIZATION, &auth_value)
+        .get(search_url)
+        .headers(headers.clone())
         .send()
         .unwrap()
         .json::<serde_json::Value>()
-        .unwrap()
-        .clone();
+        .unwrap();
+
+    let release_url = search_object["results"][0]["resource_url"].as_str().unwrap();
+
+    println!("Fetching {}", release_url);
 
     let release_object = http_client
-        .get(search_object["results"][0]["resource_url"].as_str().unwrap())
-        .header(USER_AGENT, USER_AGENT_VALUE)
-        .header(AUTHORIZATION, &auth_value)
+        .get(release_url)
+        .headers(headers.clone())
         .send()
         .unwrap()
         .json::<serde_json::Value>()
         .unwrap()
         .clone();
 
+    DiscogsReleaseInfo {
+        json: release_object
+    }
+}
+
+fn calculate_target_files(
+    music_files: &Vec<MusicFile>,
+    discogs_releases: &HashMap<ReleaseKey, DiscogsReleaseInfo>,
+    target_path: &Path,
+) -> Vec<MusicFile> {
+    let mut result: Vec<MusicFile> = Vec::with_capacity(music_files.len());
+
+    for music_file in music_files {
+        let release_info = discogs_releases.get(&release_key(music_file)).unwrap();
+        let tag_from_discogs_info = tag_from_discogs_info(&music_file.tag, release_info);
+        let target_path = PathBuf::from(target_path).join(relative_file_path(&music_file));
+
+        result.push(MusicFile {
+            file_path: target_path,
+            tag: tag_from_discogs_info,
+        })
+    }
+
+    result
+}
+
+fn write_music_files(source: &Vec<MusicFile>, target: &Vec<MusicFile>) {
+    for i in 0..source.len() {
+        let source = &source[i];
+        let target = &target[i];
+
+        println!("Copying {} -> {}...", source.file_path.display(), target.file_path.display());
+
+        fs::create_dir_all(target.file_path.parent().unwrap()).unwrap();
+        fs::copy(&source.file_path, &target.file_path).unwrap();
+
+        // Have to remove id3v1 explicitly first
+        {
+            let mut file = fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&target.file_path)
+                .unwrap();
+            file.seek(io::SeekFrom::Start(0)).unwrap();
+            v1::Tag::remove(&mut file).unwrap();
+        }
+
+        target.tag.write_to_path(&target.file_path, Version::Id3v24).unwrap();
+    }
+}
+
+fn download_covers(
+    http_client: &blocking::Client,
+    headers: &HeaderMap,
+    music_files: &Vec<MusicFile>,
+    discogs_releases: &HashMap<ReleaseKey, DiscogsReleaseInfo>,
+) {
+    let mut paths = HashMap::new();
+
+    for music_file in music_files {
+        let release_key = release_key(music_file);
+        let parent_path = PathBuf::from(music_file.file_path.parent().unwrap());
+        paths.insert(release_key, parent_path);
+    }
+
+    for (release_key, path) in &paths {
+        let discogs_release = discogs_releases.get(release_key).unwrap();
+        let cover_uri = discogs_release.json["images"].as_array().unwrap().iter()
+            .find(|v| v["type"].as_str().unwrap() == "primary")
+            .map(|v| v["uri"].as_str().unwrap().to_string());
+        if let Some(cover_uri) = cover_uri {
+            download_cover(http_client, headers, &cover_uri, path);
+        }
+    }
+}
+
+fn download_cover(
+    http_client: &blocking::Client,
+    headers: &HeaderMap,
+    uri: &str,
+    folder_path: &Path,
+) {
+    let mut response = http_client.get(uri)
+        .headers(headers.clone())
+        .send()
+        .unwrap();
+
+    let extension = match response.headers().get(CONTENT_TYPE).unwrap().to_str().unwrap() {
+        "image/jpeg" => "jpg",
+        "image/png" => "png",
+        x => panic!("Undefined image content type: {}", x)
+    };
+
+    let cover_path = folder_path.join("cover").with_extension(OsStr::new(extension));
+
+    println!("Will use {} as a cover: {}", &uri, cover_path.display());
+
+    response
+        .copy_to(&mut std::fs::File::create(&cover_path).unwrap())
+        .unwrap();
+}
+
+fn tag_from_discogs_info(original_tag: &Tag, info: &DiscogsReleaseInfo) -> Tag {
+    let release_object = &info.json;
     let track_number = original_tag.track().unwrap();
     let track_index = (track_number as usize) - 1;
     let track_object = &release_object["tracklist"][track_index];
     let artists = release_object["artists"].as_array().unwrap();
 
-    let mut new_tag = Tag::new();
-    new_tag.set_title(track_object["title"].as_str().unwrap());
-    new_tag.set_album(release_object["title"].as_str().unwrap());
-    new_tag.set_artist(artists.iter().map(|v| v["name"].as_str().unwrap()).collect::<Vec<&str>>().join(" & "));
-    new_tag.set_album_artist(artists.iter().map(|v| v["name"].as_str().unwrap()).collect::<Vec<&str>>().join(" & "));
-    new_tag.set_date_recorded(Timestamp {
+    let mut tag = Tag::new();
+    tag.set_title(track_object["title"].as_str().unwrap());
+    tag.set_album(release_object["title"].as_str().unwrap());
+    tag.set_artist(artists.iter().map(|v| v["name"].as_str().unwrap()).collect::<Vec<&str>>().join(" & "));
+    tag.set_album_artist(artists.iter().map(|v| v["name"].as_str().unwrap()).collect::<Vec<&str>>().join(" & "));
+    tag.set_date_recorded(Timestamp {
         year: release_object["year"].as_i64().unwrap() as i32,
         month: None,
         day: None,
@@ -203,14 +281,53 @@ fn discogs_tag_and_image_uri(original_tag: &Tag, http_client: &blocking::Client,
         minute: None,
         second: None,
     });
-    new_tag.set_track(track_number);
-    new_tag.set_genre(release_object["styles"].as_array().unwrap()
+    tag.set_track(track_number);
+    tag.set_genre(release_object["styles"].as_array().unwrap()
         .iter().map(|v| v.as_str().unwrap()).collect::<Vec<&str>>().join("; "));
 
-    let primary_image_uri = release_object["images"].as_array().unwrap().iter()
-        .find(|v| v["type"].as_str().unwrap() == "primary")
-        .map(|v| v["uri"].as_str().unwrap().to_string())
-        .clone();
+    tag
+}
 
-    (new_tag, primary_image_uri)
+fn common_headers(discogs_token: &str) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(USER_AGENT, HeaderValue::try_from("orgtag").unwrap());
+    headers.insert(AUTHORIZATION, HeaderValue::try_from(format!("Discogs token={}", discogs_token)).unwrap());
+    headers
+}
+
+fn relative_file_path(music_file: &MusicFile) -> PathBuf {
+    let mut path = relative_folder_path(music_file);
+    let tag = &music_file.tag;
+    let extension = music_file.file_path.extension().unwrap().to_str().unwrap();
+    match tag.disc() {
+        Some(disc) => path.push(format!(
+            "{disc:02}.{track:02}. {title}.{ext}",
+            disc = disc,
+            track = tag.track().unwrap(),
+            title = tag.title().unwrap(),
+            ext = extension,
+        )),
+        None => path.push(format!(
+            "{track:02}. {title}.{ext}",
+            track = tag.track().unwrap(),
+            title = tag.title().unwrap(),
+            ext = extension,
+        )),
+    }
+    path
+}
+
+fn relative_folder_path(music_file: &MusicFile) -> PathBuf {
+    let tag = &music_file.tag;
+    let mut path = PathBuf::new();
+    path.push(tag.artist().unwrap());
+    path.push(format!("({}) {}", tag.year().unwrap(), tag.album().unwrap()));
+    path
+}
+
+fn release_key(music_file: &MusicFile) -> ReleaseKey {
+    ReleaseKey {
+        artist: music_file.tag.artist().unwrap().to_string(),
+        album: music_file.tag.album().unwrap().to_string(),
+    }
 }

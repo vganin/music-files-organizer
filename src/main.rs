@@ -266,9 +266,8 @@ fn download_covers(
     let mut paths = HashMap::new();
 
     for change in changes {
-        let source = change.source;
-        let release_key = release_key(source);
-        let parent_path = PathBuf::from(source.file_path.parent().unwrap());
+        let release_key = release_key(change.source);
+        let parent_path = PathBuf::from(change.target.file_path.parent().unwrap());
         paths.insert(release_key, parent_path);
     }
 

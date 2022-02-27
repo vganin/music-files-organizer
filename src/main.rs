@@ -215,7 +215,15 @@ fn print_changes_details(changes: &Vec<MusicFileChange>) {
         let source = change.source;
         let target = &change.target;
 
-        println!("{:02}. Copy {} -> {}", index + 1, source.file_path.display(), target.file_path.display());
+        let source_file_path = &source.file_path;
+        let target_file_path = &target.file_path;
+        let common_file_prefix = common_path::common_path(source_file_path, target_file_path).unwrap();
+        println!(
+            "{:02}. Copy {} -> {}",
+            index + 1,
+            source_file_path.strip_prefix(&common_file_prefix).unwrap().display(),
+            target_file_path.strip_prefix(&common_file_prefix).unwrap().display(),
+        );
 
         let source_tag = &source.tag;
         let target_tag = &target.tag;

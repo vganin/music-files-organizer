@@ -85,6 +85,7 @@ fn main() {
         .show_defaults()
         .confirm() == Answer::YES
     {
+        println!("Working...");
         write_music_files(&changes);
         download_covers(&http_client, &headers, &changes, &discogs_releases);
     }

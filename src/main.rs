@@ -195,7 +195,8 @@ fn calculate_changes<'a>(
     for music_file in music_files {
         let release_info = discogs_releases.get(&release_key(music_file)).unwrap();
         let tag_from_discogs_info = tag_from_discogs_info(&music_file.tag, release_info);
-        let target_path = PathBuf::from(target_path).join(relative_file_path(&music_file));
+        let target_path = PathBuf::from(target_path)
+            .join(relative_file_path(&tag_from_discogs_info, music_file.file_path.extension().unwrap().to_str().unwrap()));
 
         result.push(MusicFileChange {
             source: music_file,
@@ -214,7 +215,7 @@ fn print_changes_details(changes: &Vec<MusicFileChange>) {
         let source = change.source;
         let target = &change.target;
 
-        println!("{:02}. Copy {} -> {}...", index + 1, source.file_path.display(), target.file_path.display());
+        println!("{:02}. Copy {} -> {}", index + 1, source.file_path.display(), target.file_path.display());
 
         let source_tag = &source.tag;
         let target_tag = &target.tag;
@@ -342,33 +343,30 @@ fn common_headers(discogs_token: &str) -> HeaderMap {
     headers
 }
 
-fn relative_file_path(music_file: &MusicFile) -> PathBuf {
-    let mut path = relative_folder_path(music_file);
-    let tag = &music_file.tag;
-    let extension = music_file.file_path.extension().unwrap().to_str().unwrap();
+fn relative_file_path(tag: &Tag, ext: &str) -> PathBuf {
+    let mut path = relative_folder_path(tag);
     match tag.disc() {
         Some(disc) => path.push(format!(
             "{disc:02}.{track:02}. {title}.{ext}",
             disc = disc,
             track = tag.track().unwrap(),
             title = tag.title().unwrap(),
-            ext = extension,
+            ext = ext,
         )),
         None => path.push(format!(
             "{track:02}. {title}.{ext}",
             track = tag.track().unwrap(),
             title = tag.title().unwrap(),
-            ext = extension,
+            ext = ext,
         )),
     }
     path
 }
 
-fn relative_folder_path(music_file: &MusicFile) -> PathBuf {
-    let tag = &music_file.tag;
+fn relative_folder_path(tag: &Tag) -> PathBuf {
     let mut path = PathBuf::new();
     path.push(tag.artist().unwrap());
-    path.push(format!("({}) {}", tag.year().unwrap(), tag.album().unwrap()));
+    path.push(format!("({}) {}", tag.date_recorded().unwrap(), tag.album().unwrap()));
     path
 }
 

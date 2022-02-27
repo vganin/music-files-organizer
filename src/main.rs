@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use id3::{Tag, TagLike, Timestamp, v1, Version};
+use question::{Answer, Question};
 use reqwest::{blocking, Url};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT};
 
@@ -43,6 +44,11 @@ struct ReleaseKey {
     album: String,
 }
 
+struct MusicFileChange<'a> {
+    source: &'a MusicFile,
+    target: MusicFile,
+}
+
 fn main() {
     let args = Args::parse();
 
@@ -64,10 +70,24 @@ fn main() {
 
     let source_music_files = inspect_path(&args.input_file_path);
     let discogs_releases = fetch_discogs_releases(&http_client, &headers, &source_music_files);
-    let target_music_files = calculate_target_files(&source_music_files, &discogs_releases, &args.output_file_path);
+    let changes = calculate_changes(&source_music_files, &discogs_releases, &args.output_file_path);
 
-    write_music_files(&source_music_files, &target_music_files);
-    download_covers(&http_client, &headers, &target_music_files, &discogs_releases);
+    if Question::new("Do you want to print changes?")
+        .default(Answer::YES)
+        .show_defaults()
+        .confirm() == Answer::YES
+    {
+        print_changes_details(&changes);
+    }
+
+    if Question::new("Do you want to make changes?")
+        .default(Answer::YES)
+        .show_defaults()
+        .confirm() == Answer::YES
+    {
+        write_music_files(&changes);
+        download_covers(&http_client, &headers, &changes, &discogs_releases);
+    }
 }
 
 fn inspect_path(path: impl AsRef<Path>) -> Vec<MusicFile> {
@@ -92,14 +112,12 @@ fn inspect_directory(path: impl AsRef<Path>) -> Vec<MusicFile> {
 }
 
 fn inspect_file(path: impl AsRef<Path>) -> Option<MusicFile> {
-    println!("Inspecting file {}", path.as_ref().display());
     match Tag::read_from_path(&path) {
         Ok(tag) => Some(MusicFile {
             file_path: PathBuf::from(path.as_ref()),
             tag,
         }),
-        Err(error) => {
-            println!("Can't read tags: {}", error);
+        Err(_) => {
             return None;
         }
     }
@@ -164,33 +182,59 @@ fn fetch_discogs_release(
     }
 }
 
-fn calculate_target_files(
-    music_files: &Vec<MusicFile>,
+fn calculate_changes<'a>(
+    music_files: &'a Vec<MusicFile>,
     discogs_releases: &HashMap<ReleaseKey, DiscogsReleaseInfo>,
     target_path: &Path,
-) -> Vec<MusicFile> {
-    let mut result: Vec<MusicFile> = Vec::with_capacity(music_files.len());
+) -> Vec<MusicFileChange<'a>> {
+    let mut result = Vec::with_capacity(music_files.len());
 
     for music_file in music_files {
         let release_info = discogs_releases.get(&release_key(music_file)).unwrap();
         let tag_from_discogs_info = tag_from_discogs_info(&music_file.tag, release_info);
         let target_path = PathBuf::from(target_path).join(relative_file_path(&music_file));
 
-        result.push(MusicFile {
-            file_path: target_path,
-            tag: tag_from_discogs_info,
-        })
+        result.push(MusicFileChange {
+            source: music_file,
+            target: MusicFile {
+                file_path: target_path,
+                tag: tag_from_discogs_info,
+            },
+        });
     }
 
     result
 }
 
-fn write_music_files(source: &Vec<MusicFile>, target: &Vec<MusicFile>) {
-    for i in 0..source.len() {
-        let source = &source[i];
-        let target = &target[i];
+fn print_changes_details(changes: &Vec<MusicFileChange>) {
+    for (index, change) in changes.iter().enumerate() {
+        let source = change.source;
+        let target = &change.target;
 
-        println!("Copying {} -> {}...", source.file_path.display(), target.file_path.display());
+        println!("{:02}. Copy {} -> {}...", index + 1, source.file_path.display(), target.file_path.display());
+
+        let source_tag = &source.tag;
+        let target_tag = &target.tag;
+        for target_frame in target_tag.frames() {
+            let frame_id = target_frame.id();
+            let source_frame_value = source_tag.get(frame_id).map(|v| v.content().to_string());
+            let target_frame_value = Some(target_frame.content().to_string());
+            if target_frame_value != source_frame_value {
+                println!(
+                    "    Change {}: {} -> {}",
+                    target_frame.name(),
+                    source_frame_value.unwrap_or(String::from("None")),
+                    target_frame_value.unwrap_or(String::from("None")),
+                );
+            }
+        }
+    }
+}
+
+fn write_music_files(changes: &Vec<MusicFileChange>) {
+    for change in changes {
+        let source = change.source;
+        let target = &change.target;
 
         fs::create_dir_all(target.file_path.parent().unwrap()).unwrap();
         fs::copy(&source.file_path, &target.file_path).unwrap();
@@ -213,14 +257,15 @@ fn write_music_files(source: &Vec<MusicFile>, target: &Vec<MusicFile>) {
 fn download_covers(
     http_client: &blocking::Client,
     headers: &HeaderMap,
-    music_files: &Vec<MusicFile>,
+    changes: &Vec<MusicFileChange>,
     discogs_releases: &HashMap<ReleaseKey, DiscogsReleaseInfo>,
 ) {
     let mut paths = HashMap::new();
 
-    for music_file in music_files {
-        let release_key = release_key(music_file);
-        let parent_path = PathBuf::from(music_file.file_path.parent().unwrap());
+    for change in changes {
+        let source = change.source;
+        let release_key = release_key(source);
+        let parent_path = PathBuf::from(source.file_path.parent().unwrap());
         paths.insert(release_key, parent_path);
     }
 
@@ -253,8 +298,6 @@ fn download_cover(
     };
 
     let cover_path = folder_path.join("cover").with_extension(OsStr::new(extension));
-
-    println!("Will use {} as a cover: {}", &uri, cover_path.display());
 
     response
         .copy_to(&mut std::fs::File::create(&cover_path).unwrap())

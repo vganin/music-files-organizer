@@ -309,7 +309,8 @@ fn tag_from_discogs_info(original_tag: &Tag, info: &DiscogsReleaseInfo) -> Tag {
     let release_object = &info.json;
     let track_number = original_tag.track().unwrap();
     let track_index = (track_number as usize) - 1;
-    let track_object = &release_object["tracklist"][track_index];
+    let track_list_object = release_object["tracklist"].as_array().unwrap();
+    let track_object = &track_list_object[track_index];
     let artists = release_object["artists"].as_array().unwrap();
 
     let mut tag = Tag::new();
@@ -326,6 +327,7 @@ fn tag_from_discogs_info(original_tag: &Tag, info: &DiscogsReleaseInfo) -> Tag {
         second: None,
     });
     tag.set_track(track_number);
+    tag.set_total_tracks(track_list_object.len() as u32);
     tag.set_genre(release_object["styles"].as_array().unwrap()
         .iter().map(|v| v.as_str().unwrap()).collect::<Vec<&str>>().join("; "));
 

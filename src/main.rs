@@ -73,7 +73,7 @@ fn main() {
     let changes = calculate_changes(&source_music_files, &discogs_releases, &args.output_file_path);
 
     if Question::new("Do you want to print changes?")
-        .default(Answer::YES)
+        .default(Answer::NO)
         .show_defaults()
         .confirm() == Answer::YES
     {
@@ -177,6 +177,8 @@ fn fetch_discogs_release(
         .json::<serde_json::Value>()
         .unwrap()
         .clone();
+
+    println!("Will use {}", release_object["uri"].as_str().unwrap());
 
     DiscogsReleaseInfo {
         json: release_object

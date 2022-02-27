@@ -1,5 +1,5 @@
 use std::{fs, io};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::fs::metadata;
 use std::hash::Hash;
@@ -60,11 +60,6 @@ fn main() {
         panic!("Output path is not directory")
     }
 
-    if args.clean {
-        fs::remove_dir_all(&args.output_file_path).unwrap();
-        fs::create_dir(&args.output_file_path).unwrap();
-    }
-
     let http_client = blocking::Client::new();
     let headers = common_headers(&args.discogs_token);
 
@@ -86,6 +81,9 @@ fn main() {
         .confirm() == Answer::YES
     {
         println!("Working...");
+        if args.clean {
+            clean_release_folders(&changes);
+        }
         write_music_files(&changes);
         download_covers(&http_client, &headers, &changes, &discogs_releases);
     }
@@ -239,6 +237,21 @@ fn print_changes_details(changes: &Vec<MusicFileChange>) {
                     target_frame_value.unwrap_or(String::from("None")),
                 );
             }
+        }
+    }
+}
+
+fn clean_release_folders(changes: &Vec<MusicFileChange>) {
+    let mut paths = HashSet::new();
+
+    for change in changes {
+        let parent_path = PathBuf::from(change.target.file_path.parent().unwrap());
+        paths.insert(parent_path);
+    }
+
+    for path in &paths {
+        if fs::remove_dir_all(path).is_ok() {
+            fs::create_dir_all(path).unwrap();
         }
     }
 }

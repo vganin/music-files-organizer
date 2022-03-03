@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use id3::{Tag, TagLike, Timestamp, v1, Version};
+use indicatif::ProgressBar;
 use question::{Answer, Question};
 use reqwest::{blocking, Url};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT};
@@ -80,7 +81,6 @@ fn main() {
         .show_defaults()
         .confirm() == Answer::YES
     {
-        println!("Working...");
         if args.clean {
             clean_release_folders(&changes);
         }
@@ -257,9 +257,13 @@ fn clean_release_folders(changes: &Vec<MusicFileChange>) {
 }
 
 fn write_music_files(changes: &Vec<MusicFileChange>) {
+    let spinner = ProgressBar::new_spinner();
+
     for change in changes {
         let source = change.source;
         let target = &change.target;
+
+        spinner.set_message(format!("Copying {}", source.file_path.file_name().unwrap().to_str().unwrap()));
 
         fs::create_dir_all(target.file_path.parent().unwrap()).unwrap();
         fs::copy(&source.file_path, &target.file_path).unwrap();
@@ -277,6 +281,8 @@ fn write_music_files(changes: &Vec<MusicFileChange>) {
 
         target.tag.write_to_path(&target.file_path, Version::Id3v24).unwrap();
     }
+
+    spinner.finish_with_message(format!("Copied {} files", changes.len()));
 }
 
 fn download_covers(
@@ -293,15 +299,22 @@ fn download_covers(
         paths.insert(release_key, parent_path);
     }
 
+    let spinner = ProgressBar::new_spinner();
+    let mut cover_number = 0;
+
     for (release_key, path) in &paths {
         let discogs_release = discogs_releases.get(release_key).unwrap();
         let cover_uri = discogs_release.json["images"].as_array().unwrap().iter()
             .find(|v| v["type"].as_str().unwrap() == "primary")
             .map(|v| v["uri"].as_str().unwrap().to_string());
         if let Some(cover_uri) = cover_uri {
+            cover_number += 1;
+            spinner.set_message(format!("Downloading cover {}", cover_uri));
             download_cover(http_client, headers, &cover_uri, path);
         }
     }
+
+    spinner.finish_with_message(format!("Downloaded {} covers", cover_number))
 }
 
 fn download_cover(

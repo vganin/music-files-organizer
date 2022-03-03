@@ -1,7 +1,7 @@
 use std::{fs, io};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
-use std::fs::metadata;
+use std::fs::{File, metadata, OpenOptions};
 use std::hash::Hash;
 use std::io::Seek;
 use std::path::Path;
@@ -266,20 +266,25 @@ fn write_music_files(changes: &Vec<MusicFileChange>) {
         spinner.set_message(format!("Copying {}", source.file_path.file_name().unwrap().to_str().unwrap()));
 
         fs::create_dir_all(target.file_path.parent().unwrap()).unwrap();
-        fs::copy(&source.file_path, &target.file_path).unwrap();
 
-        // Have to remove id3v1 explicitly first
-        {
-            let mut file = fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(&target.file_path)
-                .unwrap();
-            file.seek(io::SeekFrom::Start(0)).unwrap();
-            v1::Tag::remove(&mut file).unwrap();
-        }
+        let mut source_file = File::open(&source.file_path).unwrap();
+        let mut target_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&target.file_path)
+            .unwrap();
 
-        target.tag.write_to_path(&target.file_path, Version::Id3v24).unwrap();
+        io::copy(&mut source_file, &mut target_file).unwrap();
+
+        target_file.seek(io::SeekFrom::Start(0)).unwrap();
+        v1::Tag::remove(&mut target_file).unwrap();
+
+        target_file.seek(io::SeekFrom::Start(0)).unwrap();
+        target.tag.write_to(&mut target_file, Version::Id3v24).unwrap();
+
+        io::copy(&mut source_file, &mut target_file).unwrap();
     }
 
     spinner.finish_with_message(format!("Copied {} files", changes.len()));

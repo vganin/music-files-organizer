@@ -145,7 +145,7 @@ fn fetch_discogs_release(
     headers: &HeaderMap,
     release_key: &ReleaseKey,
 ) -> DiscogsReleaseInfo {
-    println!("Searching Discogs about {} - {}...", release_key.artist, release_key.album);
+    println!("Searching Discogs for {} - {}...", release_key.artist, release_key.album);
 
     let search_url = Url::parse_with_params("https://api.discogs.com/database/search", &[
         ("type", "release"),

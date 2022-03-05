@@ -358,8 +358,6 @@ fn download_cover(
 }
 
 fn tag_from_discogs_info(original_tag: &Tag, info: &DiscogsReleaseInfo) -> Tag {
-    println!("{}", &info.json.to_string());
-
     let release_object = &info.json;
     let track_number = original_tag.track().unwrap();
     let track_list_object = release_object["tracklist"].as_array().unwrap();

@@ -17,6 +17,7 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue, USER_
 use sanitize_filename::sanitize;
 
 const DISCOGS_RELEASE_ID_TAG: &str = "DISCOGS_RELEASE_ID";
+const DISCOGS_TOKEN_FILENAME: &str = ".discogs_token";
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -28,7 +29,7 @@ struct Args {
     output_file_path: PathBuf,
 
     #[clap(short, long)]
-    discogs_token: String,
+    discogs_token: Option<String>,
 
     #[clap(short, long)]
     clean: bool,
@@ -65,8 +66,19 @@ fn main() {
         panic!("Output path is not directory")
     }
 
+    let discogs_token = match &args.discogs_token {
+        Some(x) => x.to_owned(),
+        None => {
+            let discogs_token_file = get_discogs_token_file_path()
+                .expect("Supply discogs token with commandline argument (refer to --help)");
+            fs::read_to_string(&discogs_token_file).ok()
+                .expect(&format!("Supply discogs token with commandline argument (refer to --help) or with the file \"{}\"", discogs_token_file.display()))
+                .trim().to_owned()
+        }
+    };
+
     let http_client = blocking::Client::new();
-    let headers = common_headers(&args.discogs_token);
+    let headers = common_headers(&discogs_token);
 
     let source_music_files = inspect_path(&args.input_file_path);
     let discogs_releases = fetch_discogs_releases(&http_client, &headers, &source_music_files);
@@ -396,6 +408,10 @@ fn tag_from_discogs_info(original_tag: &Tag, info: &DiscogsReleaseInfo) -> Tag {
     });
 
     tag
+}
+
+fn get_discogs_token_file_path() -> Option<PathBuf> {
+    Some(dirs::home_dir()?.join(DISCOGS_TOKEN_FILENAME))
 }
 
 fn common_headers(discogs_token: &str) -> HeaderMap {

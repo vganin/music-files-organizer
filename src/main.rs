@@ -8,11 +8,15 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use clap::Parser;
-use id3::{Tag, TagLike, Timestamp, v1, Version};
+use id3::{frame, Tag, TagLike, Timestamp, v1, Version};
 use indicatif::ProgressBar;
 use question::{Answer, Question};
+use regex::Regex;
 use reqwest::{blocking, Url};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT};
+use sanitize_filename::sanitize;
+
+const DISCOGS_RELEASE_ID_TAG: &str = "DISCOGS_RELEASE_ID";
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -165,8 +169,6 @@ fn fetch_discogs_release(
 
     let release_url = search_object["results"][0]["resource_url"].as_str().unwrap();
 
-    println!("Fetching {}", release_url);
-
     let release_object = http_client
         .get(release_url)
         .headers(headers.clone())
@@ -194,7 +196,10 @@ fn calculate_changes<'a>(
         let release_info = discogs_releases.get(&release_key(music_file)).unwrap();
         let tag_from_discogs_info = tag_from_discogs_info(&music_file.tag, release_info);
         let target_path = PathBuf::from(target_path)
-            .join(relative_file_path(&tag_from_discogs_info, music_file.file_path.extension().unwrap().to_str().unwrap()));
+            .join(relative_file_path(
+                &tag_from_discogs_info,
+                music_file.file_path.extension().unwrap().to_str().unwrap(),
+            ));
 
         result.push(MusicFileChange {
             source: music_file,
@@ -217,7 +222,7 @@ fn print_changes_details(changes: &Vec<MusicFileChange>) {
         let target_file_path = &target.file_path;
         let common_file_prefix = common_path::common_path(source_file_path, target_file_path).unwrap();
         println!(
-            "{:02}. Copy {} -> {}",
+            "{:02}. Copy \"{}\" -> \"{}\"",
             index + 1,
             source_file_path.strip_prefix(&common_file_prefix).unwrap().display(),
             target_file_path.strip_prefix(&common_file_prefix).unwrap().display(),
@@ -231,7 +236,7 @@ fn print_changes_details(changes: &Vec<MusicFileChange>) {
             let target_frame_value = Some(target_frame.content().to_string());
             if target_frame_value != source_frame_value {
                 println!(
-                    "    Change {}: {} -> {}",
+                    "    Change {}: \"{}\" -> \"{}\"",
                     target_frame.name(),
                     source_frame_value.unwrap_or(String::from("None")),
                     target_frame_value.unwrap_or(String::from("None")),
@@ -309,9 +314,15 @@ fn download_covers(
 
     for (release_key, path) in &paths {
         let discogs_release = discogs_releases.get(release_key).unwrap();
-        let cover_uri = discogs_release.json["images"].as_array().unwrap().iter()
+        let images_array = discogs_release.json["images"].as_array().unwrap();
+        let cover_uri = images_array.iter()
             .find(|v| v["type"].as_str().unwrap() == "primary")
-            .map(|v| v["uri"].as_str().unwrap().to_string());
+            .map(|v| v["uri"].as_str().unwrap().to_string())
+            .or_else(|| {
+                images_array.iter()
+                    .find(|v| v["type"].as_str().unwrap() == "secondary")
+                    .map(|v| v["uri"].as_str().unwrap().to_string())
+            });
         if let Some(cover_uri) = cover_uri {
             cover_number += 1;
             spinner.set_message(format!("Downloading cover {}", cover_uri));
@@ -347,18 +358,27 @@ fn download_cover(
 }
 
 fn tag_from_discogs_info(original_tag: &Tag, info: &DiscogsReleaseInfo) -> Tag {
+    println!("{}", &info.json.to_string());
+
     let release_object = &info.json;
     let track_number = original_tag.track().unwrap();
-    let track_index = (track_number as usize) - 1;
     let track_list_object = release_object["tracklist"].as_array().unwrap();
-    let track_object = &track_list_object[track_index];
+    let track_object = &track_list_object.iter()
+        .find(|v|
+            v["type_"].as_str().unwrap() == "track" &&
+                v["position"].as_str().to_owned().unwrap().parse::<u32>().unwrap() == track_number
+        )
+        .unwrap();
     let artists = release_object["artists"].as_array().unwrap();
+    let artist_name = artists.iter()
+        .map(|v| fix_discogs_artist_name(v["name"].as_str().unwrap().trim()))
+        .collect::<Vec<&str>>().join(" & ");
 
     let mut tag = Tag::new();
-    tag.set_title(track_object["title"].as_str().unwrap());
-    tag.set_album(release_object["title"].as_str().unwrap());
-    tag.set_artist(artists.iter().map(|v| v["name"].as_str().unwrap()).collect::<Vec<&str>>().join(" & "));
-    tag.set_album_artist(artists.iter().map(|v| v["name"].as_str().unwrap()).collect::<Vec<&str>>().join(" & "));
+    tag.set_title(track_object["title"].as_str().unwrap().trim());
+    tag.set_album(release_object["title"].as_str().unwrap().trim());
+    tag.set_artist(&artist_name);
+    tag.set_album_artist(&artist_name);
     tag.set_date_recorded(Timestamp {
         year: release_object["year"].as_i64().unwrap() as i32,
         month: None,
@@ -370,7 +390,12 @@ fn tag_from_discogs_info(original_tag: &Tag, info: &DiscogsReleaseInfo) -> Tag {
     tag.set_track(track_number);
     tag.set_total_tracks(track_list_object.len() as u32);
     tag.set_genre(release_object["styles"].as_array().unwrap()
-        .iter().map(|v| v.as_str().unwrap()).collect::<Vec<&str>>().join("; "));
+        .iter().map(|v| v.as_str().unwrap().trim()).collect::<Vec<&str>>().join("; "));
+
+    tag.add_frame(frame::ExtendedText {
+        description: DISCOGS_RELEASE_ID_TAG.to_owned(),
+        value: release_object["uri"].as_str().unwrap().to_owned(),
+    });
 
     tag
 }
@@ -384,28 +409,28 @@ fn common_headers(discogs_token: &str) -> HeaderMap {
 
 fn relative_file_path(tag: &Tag, ext: &str) -> PathBuf {
     let mut path = relative_folder_path(tag);
-    match tag.disc() {
-        Some(disc) => path.push(format!(
+    path.push(sanitize(match tag.disc() {
+        Some(disc) => format!(
             "{disc:02}.{track:02}. {title}.{ext}",
             disc = disc,
             track = tag.track().unwrap(),
             title = tag.title().unwrap(),
             ext = ext,
-        )),
-        None => path.push(format!(
+        ),
+        None => format!(
             "{track:02}. {title}.{ext}",
             track = tag.track().unwrap(),
             title = tag.title().unwrap(),
             ext = ext,
-        )),
-    }
+        ),
+    }));
     path
 }
 
 fn relative_folder_path(tag: &Tag) -> PathBuf {
     let mut path = PathBuf::new();
     path.push(tag.artist().unwrap());
-    path.push(format!("({}) {}", tag.date_recorded().unwrap(), tag.album().unwrap()));
+    path.push(format!("({}) {}", tag.date_recorded().unwrap().year, tag.album().unwrap()));
     path
 }
 
@@ -415,3 +440,15 @@ fn release_key(music_file: &MusicFile) -> ReleaseKey {
         album: music_file.tag.album().unwrap().to_string(),
     }
 }
+
+fn fix_discogs_artist_name(name: &str) -> &str {
+    let regex = Regex::new(r".*( \([0-9]+\))").unwrap();
+    match regex.captures(name) {
+        Some(captures) => {
+            let range = captures.get(1).unwrap().range();
+            &name[..range.start]
+        }
+        None => name
+    }
+}
+

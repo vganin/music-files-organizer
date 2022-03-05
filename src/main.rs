@@ -300,8 +300,6 @@ fn write_music_files(changes: &Vec<MusicFileChange>) {
 
         target_file.seek(io::SeekFrom::Start(0)).unwrap();
         target.tag.write_to(&mut target_file, Version::Id3v24).unwrap();
-
-        io::copy(&mut source_file, &mut target_file).unwrap();
     }
 
     spinner.finish_with_message(format!("Copied {} files", changes.len()));

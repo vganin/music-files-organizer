@@ -9,7 +9,8 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use id3::{frame, Tag, TagLike, Timestamp, v1, Version};
-use indicatif::ProgressBar;
+use indicatif::{ProgressBar, ProgressStyle};
+use progress_streams::ProgressWriter;
 use question::{Answer, Question};
 use regex::Regex;
 use reqwest::{blocking, Url};
@@ -18,6 +19,8 @@ use sanitize_filename::sanitize;
 
 const DISCOGS_RELEASE_ID_TAG: &str = "DISCOGS_RELEASE_ID";
 const DISCOGS_TOKEN_FILENAME: &str = ".discogs_token";
+
+const PROGRESS_TICK_MS: u64 = 100u64;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -51,6 +54,7 @@ struct ReleaseKey {
 }
 
 struct MusicFileChange<'a> {
+    bytes_to_transfer: u64,
     source: &'a MusicFile,
     target: MusicFile,
 }
@@ -214,6 +218,7 @@ fn calculate_changes<'a>(
             ));
 
         result.push(MusicFileChange {
+            bytes_to_transfer: fs::metadata(&music_file.file_path).unwrap().len(),
             source: music_file,
             target: MusicFile {
                 file_path: target_path,
@@ -274,13 +279,17 @@ fn clean_release_folders(changes: &Vec<MusicFileChange>) {
 }
 
 fn write_music_files(changes: &Vec<MusicFileChange>) {
-    let spinner = ProgressBar::new_spinner();
+    let total_bytes_to_transfer: u64 = changes.iter()
+        .map(|v| v.bytes_to_transfer)
+        .sum();
+
+    let pb = default_progress_bar(total_bytes_to_transfer);
 
     for change in changes {
         let source = change.source;
         let target = &change.target;
 
-        spinner.set_message(format!("Copying {}", source.file_path.file_name().unwrap().to_str().unwrap()));
+        pb.set_message(format!("Copying \"{}\"", source.file_path.file_name().unwrap().to_str().unwrap()));
 
         fs::create_dir_all(target.file_path.parent().unwrap()).unwrap();
 
@@ -293,7 +302,10 @@ fn write_music_files(changes: &Vec<MusicFileChange>) {
             .open(&target.file_path)
             .unwrap();
 
-        io::copy(&mut source_file, &mut target_file).unwrap();
+        io::copy(
+            &mut source_file,
+            &mut ProgressWriter::new(&mut target_file, |bytes| pb.inc(bytes as u64)),
+        ).unwrap();
 
         target_file.seek(io::SeekFrom::Start(0)).unwrap();
         v1::Tag::remove(&mut target_file).unwrap();
@@ -302,7 +314,7 @@ fn write_music_files(changes: &Vec<MusicFileChange>) {
         target.tag.write_to(&mut target_file, Version::Id3v24).unwrap();
     }
 
-    spinner.finish_with_message(format!("Copied {} files", changes.len()));
+    pb.finish_with_message(format!("Copied {} file(s)", changes.len()));
 }
 
 fn download_covers(
@@ -319,10 +331,11 @@ fn download_covers(
         paths.insert(release_key, parent_path);
     }
 
-    let spinner = ProgressBar::new_spinner();
+    let pb = default_progress_bar(!0);
+
     let mut cover_number = 0;
 
-    for (release_key, path) in &paths {
+    for (index, (release_key, path)) in paths.iter().enumerate() {
         let discogs_release = discogs_releases.get(release_key).unwrap();
         let images_array = discogs_release.json["images"].as_array().unwrap();
         let cover_uri = images_array.iter()
@@ -335,12 +348,12 @@ fn download_covers(
             });
         if let Some(cover_uri) = cover_uri {
             cover_number += 1;
-            spinner.set_message(format!("Downloading cover {}", cover_uri));
-            download_cover(http_client, headers, &cover_uri, path);
+            pb.set_message(format!("Downloading cover {}/{}", index + 1, paths.len()));
+            download_cover(http_client, headers, &cover_uri, path, &pb);
         }
     }
 
-    spinner.finish_with_message(format!("Downloaded {} covers", cover_number))
+    pb.finish_with_message(format!("Downloaded {} cover(s)", cover_number))
 }
 
 fn download_cover(
@@ -348,6 +361,7 @@ fn download_cover(
     headers: &HeaderMap,
     uri: &str,
     folder_path: &Path,
+    pb: &ProgressBar,
 ) {
     let mut response = http_client.get(uri)
         .headers(headers.clone())
@@ -362,8 +376,16 @@ fn download_cover(
 
     let cover_path = folder_path.join("cover").with_extension(OsStr::new(extension));
 
+    let mut file = &mut ProgressWriter::new(
+        std::fs::File::create(&cover_path).unwrap(),
+        |bytes| pb.inc(bytes as u64),
+    );
+
+    pb.set_length(response.content_length().unwrap());
+    pb.set_position(0);
+
     response
-        .copy_to(&mut std::fs::File::create(&cover_path).unwrap())
+        .copy_to(&mut file)
         .unwrap();
 }
 
@@ -462,5 +484,18 @@ fn fix_discogs_artist_name(name: &str) -> &str {
         }
         None => name
     }
+}
+
+fn default_progress_bar(len: u64) -> ProgressBar {
+    let pb = ProgressBar::new(len);
+    pb.set_style(default_progress_style());
+    pb.enable_steady_tick(PROGRESS_TICK_MS);
+    pb
+}
+
+fn default_progress_style() -> ProgressStyle {
+    ProgressStyle::default_bar()
+        .template("{spinner:.red/yellow} [{elapsed_precise}] [{bar:50.red/yellow}] {bytes}/{total_bytes} {wide_msg:.bold.dim}")
+        .progress_chars(":: ")
 }
 

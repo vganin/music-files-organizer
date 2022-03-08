@@ -172,6 +172,7 @@ fn fetch_discogs_release(
     println!("Searching Discogs for \"{} - {}\"", release_key.artist, release_key.album);
 
     let title_query = format!("{} - {}", &release_key.artist, &release_key.album);
+
     let search_params_tries = vec![
         vec![
             ("type", "release"),
@@ -206,7 +207,16 @@ fn fetch_discogs_release(
                 .map(|v| v.to_owned())
         })
         .find_map(Option::Some)
-        .unwrap();
+        .unwrap_or_else(|| {
+            match Question::new(format!("Can't find release for \"{} - {}\". Please enter release ID from Discogs:", release_key.artist, release_key.album).as_str())
+                .ask()
+            {
+                Some(Answer::RESPONSE(response)) => format!("https://api.discogs.com/releases/{}", response),
+                _ => panic!("Abort")
+            }
+        });
+
+    println!("Fetching {}", release_url);
 
     let release_object = http_client
         .get(release_url)
@@ -413,19 +423,16 @@ fn download_cover(
 }
 
 fn tag_from_discogs_info(original_tag: &Tag, info: &DiscogsReleaseInfo) -> Tag {
-    let release_object = &info.json;
+    let release = &info.json;
     let track_number = original_tag.track().unwrap();
-    let track_list_object = release_object["tracklist"].as_array().unwrap();
-    let track_object = &track_list_object.iter()
-        .find(|v|
-            v["type_"].as_str().unwrap() == "track" &&
-                v["position"].as_str().to_owned().unwrap().parse::<u32>().unwrap() == track_number
-        )
-        .unwrap();
-    let album_artists = release_object["artists"].as_array().unwrap().iter()
+    let track_list: Vec<&serde_json::Value> = release["tracklist"].as_array().unwrap().iter()
+        .filter(|v| v["type_"].as_str().unwrap() == "track")
+        .collect();
+    let track = track_list[track_number as usize - 1];
+    let album_artists = release["artists"].as_array().unwrap().iter()
         .map(|v| fix_discogs_artist_name(v["name"].as_str().unwrap().trim()))
         .collect::<Vec<&str>>();
-    let track_artists = track_object["artists"].as_array()
+    let track_artists = track["artists"].as_array()
         .map(|array| {
             array.iter()
                 .map(|v| fix_discogs_artist_name(v["name"].as_str().unwrap().trim()))
@@ -433,8 +440,8 @@ fn tag_from_discogs_info(original_tag: &Tag, info: &DiscogsReleaseInfo) -> Tag {
         });
 
     let mut tag = Tag::new();
-    tag.set_title(track_object["title"].as_str().unwrap().trim());
-    tag.set_album(release_object["title"].as_str().unwrap().trim());
+    tag.set_title(track["title"].as_str().unwrap().trim());
+    tag.set_album(release["title"].as_str().unwrap().trim());
     tag.set_album_artist(
         if album_artists.len() > 1 {
             "Various Artists"
@@ -450,7 +457,7 @@ fn tag_from_discogs_info(original_tag: &Tag, info: &DiscogsReleaseInfo) -> Tag {
     );
     tag.set_date_recorded(
         Timestamp {
-            year: release_object["year"].as_i64().unwrap() as i32,
+            year: release["year"].as_i64().unwrap() as i32,
             month: None,
             day: None,
             hour: None,
@@ -459,16 +466,16 @@ fn tag_from_discogs_info(original_tag: &Tag, info: &DiscogsReleaseInfo) -> Tag {
         }
     );
     tag.set_track(track_number);
-    tag.set_total_tracks(track_list_object.len() as u32);
+    tag.set_total_tracks(track_list.len() as u32);
     tag.set_genre(
-        release_object["styles"].as_array().unwrap().iter()
+        release["styles"].as_array().unwrap().iter()
             .map(|v| v.as_str().unwrap().trim())
             .collect::<Vec<&str>>()
             .join("; ")
     );
     tag.add_frame(frame::ExtendedText {
         description: DISCOGS_RELEASE_ID_TAG.to_owned(),
-        value: release_object["uri"].as_str().unwrap().to_owned(),
+        value: release["uri"].as_str().unwrap().to_owned(),
     });
     tag
 }

@@ -15,7 +15,7 @@ use question::{Answer, Question};
 use regex::Regex;
 use reqwest::{blocking, Url};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT};
-use sanitize_filename::sanitize;
+use sanitize_filename::{Options, sanitize_with_options};
 
 const DISCOGS_RELEASE_ID_TAG: &str = "DISCOGS_RELEASE_ID";
 const DISCOGS_TOKEN_FILENAME: &str = ".discogs_token";
@@ -399,34 +399,54 @@ fn tag_from_discogs_info(original_tag: &Tag, info: &DiscogsReleaseInfo) -> Tag {
                 v["position"].as_str().to_owned().unwrap().parse::<u32>().unwrap() == track_number
         )
         .unwrap();
-    let artists = release_object["artists"].as_array().unwrap();
-    let artist_name = artists.iter()
+    let album_artists = release_object["artists"].as_array().unwrap().iter()
         .map(|v| fix_discogs_artist_name(v["name"].as_str().unwrap().trim()))
-        .collect::<Vec<&str>>().join(" & ");
+        .collect::<Vec<&str>>();
+    let track_artists = track_object["artists"].as_array()
+        .map(|array| {
+            array.iter()
+                .map(|v| fix_discogs_artist_name(v["name"].as_str().unwrap().trim()))
+                .collect::<Vec<&str>>()
+        });
 
     let mut tag = Tag::new();
     tag.set_title(track_object["title"].as_str().unwrap().trim());
     tag.set_album(release_object["title"].as_str().unwrap().trim());
-    tag.set_artist(&artist_name);
-    tag.set_album_artist(&artist_name);
-    tag.set_date_recorded(Timestamp {
-        year: release_object["year"].as_i64().unwrap() as i32,
-        month: None,
-        day: None,
-        hour: None,
-        minute: None,
-        second: None,
-    });
+    tag.set_album_artist(
+        if album_artists.len() > 1 {
+            "Various Artists"
+        } else {
+            album_artists.get(0).unwrap()
+        }
+    );
+    tag.set_artist(
+        track_artists
+            .or(Some(album_artists))
+            .unwrap()
+            .join(" & ")
+    );
+    tag.set_date_recorded(
+        Timestamp {
+            year: release_object["year"].as_i64().unwrap() as i32,
+            month: None,
+            day: None,
+            hour: None,
+            minute: None,
+            second: None,
+        }
+    );
     tag.set_track(track_number);
     tag.set_total_tracks(track_list_object.len() as u32);
-    tag.set_genre(release_object["styles"].as_array().unwrap()
-        .iter().map(|v| v.as_str().unwrap().trim()).collect::<Vec<&str>>().join("; "));
-
+    tag.set_genre(
+        release_object["styles"].as_array().unwrap().iter()
+            .map(|v| v.as_str().unwrap().trim())
+            .collect::<Vec<&str>>()
+            .join("; ")
+    );
     tag.add_frame(frame::ExtendedText {
         description: DISCOGS_RELEASE_ID_TAG.to_owned(),
         value: release_object["uri"].as_str().unwrap().to_owned(),
     });
-
     tag
 }
 
@@ -443,7 +463,7 @@ fn common_headers(discogs_token: &str) -> HeaderMap {
 
 fn relative_file_path(tag: &Tag, ext: &str) -> PathBuf {
     let mut path = relative_folder_path(tag);
-    path.push(sanitize(match tag.disc() {
+    path.push(sanitize_path(match tag.disc() {
         Some(disc) => format!(
             "{disc:02}.{track:02}. {title}.{ext}",
             disc = disc,
@@ -463,9 +483,15 @@ fn relative_file_path(tag: &Tag, ext: &str) -> PathBuf {
 
 fn relative_folder_path(tag: &Tag) -> PathBuf {
     let mut path = PathBuf::new();
-    path.push(tag.artist().unwrap());
-    path.push(format!("({}) {}", tag.date_recorded().unwrap().year, tag.album().unwrap()));
+    path.push(sanitize_path(tag.album_artist().unwrap()));
+    path.push(sanitize_path(format!("({}) {}", tag.date_recorded().unwrap().year, tag.album().unwrap())));
     path
+}
+
+fn sanitize_path<S: AsRef<str>>(name: S) -> String {
+    let mut options = Options::default();
+    options.replacement = "-";
+    sanitize_with_options(name, options)
 }
 
 fn release_key(music_file: &MusicFile) -> ReleaseKey {

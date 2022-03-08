@@ -88,6 +88,10 @@ fn main() {
     let discogs_releases = fetch_discogs_releases(&http_client, &headers, &source_music_files);
     let changes = calculate_changes(&source_music_files, &discogs_releases, &args.output_file_path);
 
+    if changes.is_empty() {
+        panic!("Nothing to work on!");
+    }
+
     if Question::new("Do you want to print changes?")
         .default(Answer::NO)
         .show_defaults()

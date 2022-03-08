@@ -17,7 +17,7 @@ use reqwest::{blocking, Url};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT};
 use sanitize_filename::{Options, sanitize_with_options};
 
-const DISCOGS_RELEASE_ID_TAG: &str = "DISCOGS_RELEASE_ID";
+const DISCOGS_RELEASE_TAG: &str = "DISCOGS_RELEASE";
 const DISCOGS_TOKEN_FILENAME: &str = ".discogs_token";
 
 const PROGRESS_TICK_MS: u64 = 100u64;
@@ -474,7 +474,7 @@ fn tag_from_discogs_info(original_tag: &Tag, info: &DiscogsReleaseInfo) -> Tag {
             .join("; ")
     );
     tag.add_frame(frame::ExtendedText {
-        description: DISCOGS_RELEASE_ID_TAG.to_owned(),
+        description: DISCOGS_RELEASE_TAG.to_owned(),
         value: release["uri"].as_str().unwrap().to_owned(),
     });
     tag

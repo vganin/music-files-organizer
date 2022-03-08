@@ -165,25 +165,44 @@ fn fetch_discogs_release(
     headers: &HeaderMap,
     release_key: &ReleaseKey,
 ) -> DiscogsReleaseInfo {
-    println!("Searching Discogs for {} - {}...", release_key.artist, release_key.album);
+    println!("Searching Discogs for \"{} - {}\"", release_key.artist, release_key.album);
 
-    let search_url = Url::parse_with_params("https://api.discogs.com/database/search", &[
-        ("type", "release"),
-        ("artist", release_key.artist.as_str()),
-        ("release_title", release_key.album.as_str()),
-    ]).unwrap();
+    let title_query = format!("{} - {}", &release_key.artist, &release_key.album);
+    let search_params_tries = vec![
+        vec![
+            ("type", "release"),
+            ("artist", &release_key.artist),
+            ("release_title", &release_key.album),
+        ],
+        vec![
+            ("type", "release"),
+            ("title", &title_query),
+        ],
+        vec![
+            ("type", "release"),
+            ("query", &title_query),
+        ],
+    ];
 
-    println!("Fetching {}", search_url);
+    let release_url = search_params_tries.iter()
+        .filter_map(|search_params| {
+            let search_url = Url::parse_with_params("https://api.discogs.com/database/search", search_params).unwrap();
 
-    let search_object = http_client
-        .get(search_url)
-        .headers(headers.clone())
-        .send()
-        .unwrap()
-        .json::<serde_json::Value>()
+            println!("Fetching {}", search_url);
+
+            http_client
+                .get(search_url)
+                .headers(headers.clone())
+                .send()
+                .unwrap()
+                .json::<serde_json::Value>()
+                .unwrap()
+                ["results"][0]["resource_url"]
+                .as_str()
+                .map(|v| v.to_owned())
+        })
+        .find_map(Option::Some)
         .unwrap();
-
-    let release_url = search_object["results"][0]["resource_url"].as_str().unwrap();
 
     let release_object = http_client
         .get(release_url)

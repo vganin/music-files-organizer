@@ -191,6 +191,19 @@ fn fetch_discogs_release(
 
     let search_params_tries = vec![
         vec![
+            ("type", "master"),
+            ("artist", &release_key.artist),
+            ("release_title", &release_key.album),
+        ],
+        vec![
+            ("type", "master"),
+            ("title", &title_query),
+        ],
+        vec![
+            ("type", "master"),
+            ("query", &title_query),
+        ],
+        vec![
             ("type", "release"),
             ("artist", &release_key.artist),
             ("release_title", &release_key.album),
@@ -317,14 +330,14 @@ fn print_changes_details(changes: &ChangeList) {
 
         let source_file_path = &source.file_path;
         let target_file_path = &target.file_path;
-        let common_file_prefix = common_path::common_path(source_file_path, target_file_path).unwrap();
         if source_file_path == target_file_path {
             println!(
                 "{:02}. Edit \"{}\"",
                 step_number,
-                source_file_path.strip_prefix(&common_file_prefix).unwrap().display(),
+                source_file_path.file_name().unwrap().to_str().unwrap(),
             );
         } else {
+            let common_file_prefix = common_path::common_path(source_file_path, target_file_path).unwrap();
             println!(
                 "{:02}. Copy \"{}\" -> \"{}\"",
                 step_number,

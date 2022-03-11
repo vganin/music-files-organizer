@@ -1,3 +1,5 @@
+extern crate core;
+
 use std::{fs, io};
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, metadata, OpenOptions};
@@ -7,7 +9,6 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use clap::Parser;
-use id3::{frame, Tag, TagLike, Timestamp, v1, Version};
 use indicatif::{ProgressBar, ProgressStyle};
 use progress_streams::ProgressWriter;
 use question::{Answer, Question};
@@ -15,6 +16,10 @@ use regex::Regex;
 use reqwest::{blocking, Url};
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
 use sanitize_filename::{Options, sanitize_with_options};
+
+use crate::tag::Tag;
+
+mod tag;
 
 const DISCOGS_RELEASE_TAG: &str = "DISCOGS_RELEASE";
 const DISCOGS_TOKEN_FILE_NAME: &str = ".discogs_token";
@@ -41,7 +46,7 @@ struct Args {
 
 struct MusicFile {
     file_path: PathBuf,
-    tag: Tag,
+    tag: Box<dyn Tag>,
 }
 
 struct DiscogsReleaseInfo {
@@ -63,7 +68,7 @@ struct MusicFileChange {
 impl MusicFileChange {
     fn is_phony(&self) -> bool {
         self.source.file_path == self.target.file_path &&
-            !target_changes_source(&self.source.tag, &self.target.tag)
+            !target_changes_source(&*self.source.tag, &*self.target.tag)
     }
 }
 
@@ -151,15 +156,12 @@ fn inspect_directory(path: impl AsRef<Path>) -> Vec<MusicFile> {
 }
 
 fn inspect_file(path: impl AsRef<Path>) -> Option<MusicFile> {
-    match Tag::read_from_path(&path) {
-        Ok(tag) => Some(MusicFile {
+    tag::read_from_path(&path).map(|tag| {
+        MusicFile {
             file_path: PathBuf::from(path.as_ref()),
             tag,
-        }),
-        Err(_) => {
-            return None;
         }
-    }
+    })
 }
 
 fn fetch_discogs_releases(
@@ -273,12 +275,12 @@ fn calculate_changes(
 
     for source in source_music_files {
         let release_info = discogs_releases.get(&release_key(&source)).unwrap();
-        let source_tag = &source.tag;
+        let source_tag = &*source.tag;
         let target_tag = tag_from_discogs_info(source_tag, release_info);
         let source_path = &source.file_path;
-        let target_folder_path = import_path.join(music_folder_path(&target_tag));
+        let target_folder_path = import_path.join(music_folder_path(&*target_tag));
         let target_path = target_folder_path.join(music_file_name(
-            &target_tag, source_path.extension().unwrap().to_str().unwrap()));
+            &*target_tag, source_path.extension().unwrap().to_str().unwrap()));
         let bytes_to_transfer = fs::metadata(&source_path).unwrap().len();
 
         music_file_changes.push(MusicFileChange {
@@ -348,14 +350,13 @@ fn print_changes_details(changes: &ChangeList) {
 
         let source_tag = &source.tag;
         let target_tag = &target.tag;
-        for target_frame in target_tag.frames() {
-            let frame_id = target_frame.id();
-            let source_frame_value = source_tag.get(frame_id).map(|v| v.content().to_string());
-            let target_frame_value = Some(target_frame.content().to_string());
+        for frame_id in target_tag.frame_ids() {
+            let source_frame_value = source_tag.frame_content_as_string(&frame_id);
+            let target_frame_value = target_tag.frame_content_as_string(&frame_id);
             if target_frame_value != source_frame_value {
                 println!(
                     "    Change {}: \"{}\" -> \"{}\"",
-                    target_frame.name(),
+                    target_tag.frame_human_readable_title(&frame_id).unwrap(),
                     source_frame_value.unwrap_or(String::from("None")),
                     target_frame_value.unwrap_or(String::from("None")),
                 );
@@ -425,14 +426,12 @@ fn write_music_files(changes: &Vec<MusicFileChange>) {
                 &mut ProgressWriter::new(&mut target_file, |bytes| pb.inc(bytes as u64)),
             ).unwrap();
 
+            target_file.seek(io::SeekFrom::Start(0)).unwrap();
+
             target_file
         };
 
-        target_file.seek(io::SeekFrom::Start(0)).unwrap();
-        v1::Tag::remove(&mut target_file).unwrap();
-
-        target_file.seek(io::SeekFrom::Start(0)).unwrap();
-        target_tag.write_to(&mut target_file, Version::Id3v24).unwrap();
+        target_tag.write_to(&mut target_file);
     }
 
     pb.finish_with_message(format!("Written {} file(s)", &changes.len()));
@@ -507,12 +506,12 @@ fn download_cover(
         .unwrap();
 }
 
-fn tag_from_discogs_info(original_tag: &Tag, info: &DiscogsReleaseInfo) -> Tag {
+fn tag_from_discogs_info(original_tag: &dyn Tag, info: &DiscogsReleaseInfo) -> Box<dyn Tag> {
     let release = &info.json;
     let track_number = original_tag.track().unwrap();
-    let track_list: Vec<&serde_json::Value> = release["tracklist"].as_array().unwrap().iter()
+    let track_list = release["tracklist"].as_array().unwrap().iter()
         .filter(|v| v["type_"].as_str().unwrap() == "track")
-        .collect();
+        .collect::<Vec<&serde_json::Value>>();
     let track = track_list[track_number as usize - 1];
     let album_artists = release["artists"].as_array().unwrap().iter()
         .map(|v| fix_discogs_artist_name(v["name"].as_str().unwrap().trim()))
@@ -523,33 +522,29 @@ fn tag_from_discogs_info(original_tag: &Tag, info: &DiscogsReleaseInfo) -> Tag {
                 .map(|v| fix_discogs_artist_name(v["name"].as_str().unwrap().trim()))
                 .collect::<Vec<&str>>()
         });
+    let formatted_artist = release["artists_sort"].as_str();
 
-    let mut tag = Tag::new();
-    tag.set_title(track["title"].as_str().unwrap().trim());
-    tag.set_album(release["title"].as_str().unwrap().trim());
+    let mut tag = tag::new(original_tag.kind());
+    tag.set_title(track["title"].as_str().unwrap().trim().to_owned());
+    tag.set_album(release["title"].as_str().unwrap().trim().to_owned());
     tag.set_album_artist(
         if album_artists.len() > 1 {
             "Various Artists"
         } else {
             album_artists.get(0).unwrap()
-        }
+        }.to_owned()
     );
     tag.set_artist(
-        track_artists
-            .or(Some(album_artists))
-            .unwrap()
-            .join(" & ")
+        formatted_artist
+            .map(|v| v.to_owned())
+            .unwrap_or_else(|| {
+                track_artists
+                    .or(Some(album_artists))
+                    .unwrap()
+                    .join(" & ")
+            })
     );
-    tag.set_date_recorded(
-        Timestamp {
-            year: release["year"].as_i64().unwrap() as i32,
-            month: None,
-            day: None,
-            hour: None,
-            minute: None,
-            second: None,
-        }
-    );
+    tag.set_year(release["year"].as_i64().unwrap() as i32);
     tag.set_track(track_number);
     tag.set_total_tracks(track_list.len() as u32);
     tag.set_genre(
@@ -558,10 +553,7 @@ fn tag_from_discogs_info(original_tag: &Tag, info: &DiscogsReleaseInfo) -> Tag {
             .collect::<Vec<&str>>()
             .join("; ")
     );
-    tag.add_frame(frame::ExtendedText {
-        description: DISCOGS_RELEASE_TAG.to_owned(),
-        value: release["uri"].as_str().unwrap().to_owned(),
-    });
+    tag.set_custom_tag(DISCOGS_RELEASE_TAG.to_owned(), release["uri"].as_str().unwrap().to_owned());
     tag
 }
 
@@ -588,11 +580,10 @@ fn common_headers(discogs_token: &str) -> HeaderMap {
     headers
 }
 
-fn target_changes_source(source_tag: &Tag, target_tag: &Tag) -> bool {
-    for target_frame in target_tag.frames() {
-        let frame_id = target_frame.id();
-        let source_frame_value = source_tag.get(frame_id).map(|v| v.content().to_string());
-        let target_frame_value = Some(target_frame.content().to_string());
+fn target_changes_source(source_tag: &dyn Tag, target_tag: &dyn Tag) -> bool {
+    for frame_id in target_tag.frame_ids() {
+        let source_frame_value = source_tag.frame_content_as_string(&frame_id);
+        let target_frame_value = target_tag.frame_content_as_string(&frame_id);
         if target_frame_value != source_frame_value {
             return true;
         }
@@ -600,7 +591,7 @@ fn target_changes_source(source_tag: &Tag, target_tag: &Tag) -> bool {
     false
 }
 
-fn music_file_name(tag: &Tag, ext: &str) -> String {
+fn music_file_name(tag: &dyn Tag, ext: &str) -> String {
     sanitize_path(match tag.disc() {
         Some(disc) => format!(
             "{disc:02}.{track:02}. {title}.{ext}",
@@ -618,10 +609,10 @@ fn music_file_name(tag: &Tag, ext: &str) -> String {
     })
 }
 
-fn music_folder_path(tag: &Tag) -> PathBuf {
+fn music_folder_path(tag: &dyn Tag) -> PathBuf {
     let mut path = PathBuf::new();
     path.push(sanitize_path(tag.album_artist().unwrap()));
-    path.push(sanitize_path(format!("({}) {}", tag.date_recorded().unwrap().year, tag.album().unwrap())));
+    path.push(sanitize_path(format!("({}) {}", tag.year().unwrap(), tag.album().unwrap())));
     path
 }
 

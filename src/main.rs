@@ -198,21 +198,9 @@ fn fetch_discogs_release(
             ("release_title", &release_key.album),
         ],
         vec![
-            ("type", "master"),
-            ("title", &title_query),
-        ],
-        vec![
-            ("type", "master"),
-            ("query", &title_query),
-        ],
-        vec![
             ("type", "release"),
             ("artist", &release_key.artist),
             ("release_title", &release_key.album),
-        ],
-        vec![
-            ("type", "release"),
-            ("title", &title_query),
         ],
         vec![
             ("type", "release"),
@@ -514,15 +502,20 @@ fn tag_from_discogs_info(original_tag: &dyn Tag, info: &DiscogsReleaseInfo) -> B
         .collect::<Vec<&serde_json::Value>>();
     let track = track_list[track_number as usize - 1];
     let album_artists = release["artists"].as_array().unwrap().iter()
-        .map(|v| fix_discogs_artist_name(v["name"].as_str().unwrap().trim()))
-        .collect::<Vec<&str>>();
+        .map(|v| (
+            fix_discogs_artist_name(v["name"].as_str().unwrap().trim()),
+            v["join"].as_str().unwrap_or("&")
+        ))
+        .collect::<Vec<(&str, &str)>>();
     let track_artists = track["artists"].as_array()
         .map(|array| {
             array.iter()
-                .map(|v| fix_discogs_artist_name(v["name"].as_str().unwrap().trim()))
-                .collect::<Vec<&str>>()
+                .map(|v| (
+                    fix_discogs_artist_name(v["name"].as_str().unwrap().trim()),
+                    v["join"].as_str().unwrap_or("&")
+                ))
+                .collect::<Vec<(&str, &str)>>()
         });
-    let formatted_artist = release["artists_sort"].as_str();
 
     let mut tag = tag::new(original_tag.kind());
     tag.set_title(track["title"].as_str().unwrap().trim().to_owned());
@@ -531,18 +524,19 @@ fn tag_from_discogs_info(original_tag: &dyn Tag, info: &DiscogsReleaseInfo) -> B
         if album_artists.len() > 1 {
             "Various Artists"
         } else {
-            album_artists.get(0).unwrap()
+            album_artists.get(0).unwrap().0
         }.to_owned()
     );
     tag.set_artist(
-        formatted_artist
-            .map(|v| v.to_owned())
-            .unwrap_or_else(|| {
-                track_artists
-                    .or(Some(album_artists))
-                    .unwrap()
-                    .join(" & ")
-            })
+        track_artists
+            .or(Some(album_artists))
+            .unwrap()
+            .iter()
+            .flat_map(|v| [v.0, v.1])
+            .collect::<Vec<&str>>()
+            .join(" ")
+            .trim()
+            .to_owned()
     );
     tag.set_year(release["year"].as_i64().unwrap() as i32);
     tag.set_track(track_number);

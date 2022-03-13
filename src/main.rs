@@ -65,13 +65,6 @@ struct MusicFileChange {
     bytes_to_transfer: u64,
 }
 
-impl MusicFileChange {
-    fn is_phony(&self) -> bool {
-        self.source.file_path == self.target.file_path &&
-            !target_changes_source(&*self.source.tag, &*self.target.tag)
-    }
-}
-
 #[derive(Hash, PartialEq, Eq)]
 struct CoverChange {
     path: PathBuf,
@@ -317,8 +310,6 @@ fn print_changes_details(changes: &ChangeList) {
     let mut step_number = 1u32;
 
     for change in &changes.music_files {
-        if change.is_phony() { continue; }
-
         let source = &change.source;
         let target = &change.target;
 
@@ -326,7 +317,7 @@ fn print_changes_details(changes: &ChangeList) {
         let target_file_path = &target.file_path;
         if source_file_path == target_file_path {
             println!(
-                "{:02}. Edit \"{}\"",
+                "{:02}. Update \"{}\"",
                 step_number,
                 source_file_path.file_name().unwrap().to_str().unwrap(),
             );
@@ -370,10 +361,6 @@ fn print_changes_details(changes: &ChangeList) {
 }
 
 fn write_music_files(changes: &Vec<MusicFileChange>) {
-    let changes: Vec<&MusicFileChange> = changes.iter()
-        .filter(|c| !c.is_phony())
-        .collect();
-
     if changes.is_empty() { return; };
 
     let total_bytes_to_transfer: u64 = changes.iter()
@@ -382,7 +369,7 @@ fn write_music_files(changes: &Vec<MusicFileChange>) {
 
     let pb = default_progress_bar(total_bytes_to_transfer);
 
-    for change in &changes {
+    for change in changes {
         let source = &change.source;
         let target = &change.target;
         let source_path = &source.file_path;
@@ -562,17 +549,6 @@ fn common_headers(discogs_token: &str) -> HeaderMap {
     headers.insert(USER_AGENT, HeaderValue::try_from("orgtag").unwrap());
     headers.insert(AUTHORIZATION, HeaderValue::try_from(format!("Discogs token={}", discogs_token)).unwrap());
     headers
-}
-
-fn target_changes_source(source_tag: &dyn Tag, target_tag: &dyn Tag) -> bool {
-    for frame_id in target_tag.frame_ids() {
-        let source_frame_value = source_tag.frame_content_as_string(&frame_id);
-        let target_frame_value = target_tag.frame_content_as_string(&frame_id);
-        if target_frame_value != source_frame_value {
-            return true;
-        }
-    }
-    false
 }
 
 fn music_file_name(tag: &dyn Tag, ext: &str) -> String {

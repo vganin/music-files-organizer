@@ -292,14 +292,18 @@ fn calculate_changes(
     }
 
     music_file_changes.sort_by(|lhs, rhs| {
-        let lhs = &lhs.target;
-        let rhs = &rhs.target;
-        let lhs_release = release_key(lhs);
-        let rhs_release = release_key(rhs);
-        if lhs_release == rhs_release {
-            lhs.tag.track().cmp(&rhs.tag.track())
+        let lhs = &lhs.target.tag;
+        let rhs = &rhs.target.tag;
+        let lhs_album = lhs.album().unwrap();
+        let rhs_album = rhs.album().unwrap();
+        let lhs_year = lhs.year().unwrap();
+        let rhs_year = rhs.year().unwrap();
+        if lhs_album == rhs_album && lhs_year == rhs_year {
+            lhs.track().cmp(&rhs.track())
+        } else if lhs_year == rhs_year {
+            lhs_album.cmp(rhs_album)
         } else {
-            lhs_release.cmp(&rhs_release)
+            lhs_year.cmp(&rhs_year)
         }
     });
 

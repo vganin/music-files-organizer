@@ -2,7 +2,7 @@ extern crate core;
 
 use std::{fs, io};
 use std::collections::{HashMap, HashSet};
-use std::fs::{File, metadata, OpenOptions};
+use std::fs::{File, metadata};
 use std::hash::Hash;
 use std::io::Seek;
 use std::path::Path;
@@ -391,39 +391,23 @@ fn write_music_files(changes: &Vec<MusicFileChange>) {
 
         pb.set_message(format!("Writing \"{}\"", source_path.file_name().unwrap().to_str().unwrap()));
 
-        let mut target_file = if source_path == target_path {
-            let target_file = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(&target_path)
-                .unwrap();
-
-            pb.inc(target_file.metadata().unwrap().len());
-
-            target_file
-        } else {
-            fs::create_dir_all(target_path.parent().unwrap()).unwrap();
-
+        let mut temp_file = {
             let mut source_file = File::open(&source_path).unwrap();
-            let mut target_file = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(&target_path)
-                .unwrap();
+            let mut temp_file = tempfile::tempfile().unwrap();
 
-            io::copy(
-                &mut source_file,
-                &mut ProgressWriter::new(&mut target_file, |bytes| pb.inc(bytes as u64)),
-            ).unwrap();
-
-            target_file.seek(io::SeekFrom::Start(0)).unwrap();
-
-            target_file
+            io::copy(&mut source_file, &mut temp_file).unwrap();
+            temp_file.seek(io::SeekFrom::Start(0)).unwrap();
+            target_tag.write_to(&mut temp_file);
+            temp_file.seek(io::SeekFrom::Start(0)).unwrap();
+            temp_file
         };
 
-        target_tag.write_to(&mut target_file);
+        let mut target_file = ProgressWriter::new(
+            File::create(&target_path).unwrap(),
+            |bytes| pb.inc(bytes as u64),
+        );
+
+        io::copy(&mut temp_file, &mut target_file).unwrap();
     }
 
     pb.finish_with_message(format!("Written {} file(s)", &changes.len()));

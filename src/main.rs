@@ -402,6 +402,8 @@ fn write_music_files(changes: &Vec<MusicFileChange>) {
             temp_file
         };
 
+        fs::create_dir_all(target_path.parent().unwrap()).unwrap();
+
         let mut target_file = ProgressWriter::new(
             File::create(&target_path).unwrap(),
             |bytes| pb.inc(bytes as u64),

@@ -154,7 +154,10 @@ impl Tag for id3::Tag {
 
     fn write_to(&self, file: &mut File) {
         id3::v1::Tag::remove(file).unwrap();
-        id3::Tag::write_to(self, file, id3::Version::Id3v24).unwrap();
+        id3::Encoder::new()
+            .version(id3::Version::Id3v24)
+            .encode_to_file(self, file)
+            .unwrap()
     }
 }
 

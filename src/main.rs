@@ -97,7 +97,7 @@ fn main() {
     let http_client = blocking::Client::new();
     let headers = common_headers(&discogs_token);
 
-    let source_music_files = inspect_path(&args.from_path);
+    let source_music_files = get_music_files(&args.from_path);
     let discogs_releases = fetch_discogs_releases(&http_client, &headers, &source_music_files);
     let changes = calculate_changes(source_music_files, &discogs_releases, &args.to_path);
 
@@ -127,28 +127,36 @@ fn main() {
     }
 }
 
-fn inspect_path(path: impl AsRef<Path>) -> Vec<MusicFile> {
+fn get_music_files(path: impl AsRef<Path>) -> Vec<MusicFile> {
+    let pb = default_spinner();
+    let result = inspect_path(path, &pb);
+    pb.finish_and_clear();
+    result
+}
+
+fn inspect_path(path: impl AsRef<Path>, pb: &ProgressBar) -> Vec<MusicFile> {
     let file_metadata = metadata(&path).unwrap();
     if file_metadata.is_file() {
-        vec![inspect_file(&path)].into_iter().flatten().collect()
+        vec![inspect_file(&path, pb)].into_iter().flatten().collect()
     } else if file_metadata.is_dir() {
-        inspect_directory(&path)
+        inspect_directory(&path, pb)
     } else {
         vec![]
     }
 }
 
-fn inspect_directory(path: impl AsRef<Path>) -> Vec<MusicFile> {
+fn inspect_directory(path: impl AsRef<Path>, pb: &ProgressBar) -> Vec<MusicFile> {
     return fs::read_dir(path).unwrap()
         .flat_map(|entry| {
             let entry = entry.unwrap();
             let path = entry.path();
-            inspect_path(&path)
+            inspect_path(&path, pb)
         })
         .collect();
 }
 
-fn inspect_file(path: impl AsRef<Path>) -> Option<MusicFile> {
+fn inspect_file(path: impl AsRef<Path>, pb: &ProgressBar) -> Option<MusicFile> {
+    pb.set_message(format!("Analyzing \"{}\"...", path.as_ref().file_name().unwrap().to_str().unwrap()));
     tag::read_from_path(&path).map(|tag| {
         MusicFile {
             file_path: PathBuf::from(path.as_ref()),
@@ -602,14 +610,22 @@ fn fix_discogs_artist_name(name: &str) -> &str {
 
 fn default_progress_bar(len: u64) -> ProgressBar {
     let pb = ProgressBar::new(len);
-    pb.set_style(default_progress_style());
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.red/yellow} [{elapsed_precise}] [{bar:50.red/yellow}] {bytes}/{total_bytes} {wide_msg:.bold.dim}")
+            .progress_chars(":: ")
+    );
     pb.enable_steady_tick(PROGRESS_TICK_MS);
     pb
 }
 
-fn default_progress_style() -> ProgressStyle {
-    ProgressStyle::default_bar()
-        .template("{spinner:.red/yellow} [{elapsed_precise}] [{bar:50.red/yellow}] {bytes}/{total_bytes} {wide_msg:.bold.dim}")
-        .progress_chars(":: ")
+fn default_spinner() -> ProgressBar {
+    let pb = ProgressBar::new(!0);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.red/yellow} [{elapsed_precise}] {wide_msg:.bold.dim}")
+    );
+    pb.enable_steady_tick(PROGRESS_TICK_MS);
+    pb
 }
 

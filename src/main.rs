@@ -506,11 +506,17 @@ fn tag_from_discogs_info(original_tag: &dyn Tag, info: &DiscogsReleaseInfo) -> B
     tag.set_title(track["title"].as_str().unwrap().trim().to_owned());
     tag.set_album(release["title"].as_str().unwrap().trim().to_owned());
     tag.set_album_artist(
-        if album_artists.len() > 1 {
-            "Various Artists"
+        if track_artists.is_some() {
+            "Various Artists".to_owned()
         } else {
-            album_artists.get(0).unwrap().0
-        }.to_owned()
+            album_artists
+                .iter()
+                .flat_map(|v| [v.0, v.1])
+                .collect::<Vec<&str>>()
+                .join(" ")
+                .trim()
+                .to_owned()
+        }
     );
     tag.set_artist(
         track_artists

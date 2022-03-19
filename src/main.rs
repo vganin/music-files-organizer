@@ -10,6 +10,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
+use itertools::Itertools;
 use progress_streams::ProgressWriter;
 use question::{Answer, Question};
 use regex::Regex;
@@ -53,10 +54,9 @@ struct DiscogsReleaseInfo {
     json: serde_json::Value,
 }
 
-#[derive(Hash, PartialEq, Eq, PartialOrd, Ord)]
-struct ReleaseKey {
-    artist: String,
-    album: String,
+struct DiscogsRelease {
+    music_files: Vec<MusicFile>,
+    discogs_info: DiscogsReleaseInfo,
 }
 
 struct MusicFileChange {
@@ -97,9 +97,9 @@ fn main() {
     let http_client = blocking::Client::new();
     let headers = common_headers(&discogs_token);
 
-    let source_music_files = get_music_files(&args.from_path);
-    let discogs_releases = fetch_discogs_releases(&http_client, &headers, &source_music_files);
-    let changes = calculate_changes(source_music_files, &discogs_releases, &args.to_path);
+    let music_files = get_music_files(&args.from_path);
+    let discogs_releases = fetch_discogs_releases(&http_client, &headers, music_files);
+    let changes = calculate_changes(discogs_releases, &args.to_path);
 
     if changes.music_files.is_empty() && changes.covers.is_empty() {
         println!("Nothing to do, all good");
@@ -168,44 +168,63 @@ fn inspect_file(path: impl AsRef<Path>, pb: &ProgressBar) -> Option<MusicFile> {
 fn fetch_discogs_releases(
     http_client: &blocking::Client,
     headers: &HeaderMap,
-    music_files: &Vec<MusicFile>,
-) -> HashMap<ReleaseKey, DiscogsReleaseInfo> {
-    let mut result: HashMap<ReleaseKey, DiscogsReleaseInfo> = HashMap::new();
+    music_files: Vec<MusicFile>,
+) -> Vec<DiscogsRelease> {
+    let mut files_grouped_by_parent_path: HashMap<PathBuf, Vec<MusicFile>> = HashMap::new();
 
     for music_file in music_files {
-        let release_key = release_key(music_file);
-        if !result.contains_key(&release_key) {
-            let discogs_release_info = fetch_discogs_release(http_client, headers, &release_key);
-            result.insert(release_key, discogs_release_info);
-        }
+        let parent_path = music_file.file_path.parent().unwrap().to_owned();
+        files_grouped_by_parent_path.entry(parent_path).or_default().push(music_file);
+    }
+
+    let mut result = Vec::new();
+
+    for (path, music_files) in files_grouped_by_parent_path {
+        let artists: Vec<String> = music_files.iter().map(|v| v.tag.artist().unwrap().to_string()).unique().collect();
+        let albums: Vec<String> = music_files.iter().map(|v| v.tag.album().unwrap().to_string()).unique().collect();
+
+        assert_eq!(
+            albums.len(), 1, "Different albums in one folder \"{}\": [{}]",
+            path.display(),
+            albums.iter().map(|v| format!("\"{}\"", v)).join(", ")
+        );
+
+        let discogs_info = fetch_discogs_release_info(http_client, headers, &artists, &albums[0]);
+
+        result.push(DiscogsRelease {
+            music_files,
+            discogs_info,
+        });
     }
 
     result
 }
 
-fn fetch_discogs_release(
+fn fetch_discogs_release_info(
     http_client: &blocking::Client,
     headers: &HeaderMap,
-    release_key: &ReleaseKey,
+    artists: &[String],
+    album: &str,
 ) -> DiscogsReleaseInfo {
-    println!("Searching Discogs for \"{} - {}\"", release_key.artist, release_key.album);
+    println!("Searching Discogs for \"{} - {}\"", &artists.join(", "), album);
 
-    let title_query = format!("{} - {}", &release_key.artist, &release_key.album);
+    let artist_param = artists.join(" ");
+    let query_param = format!("{} - {}", &artists.join(", "), &album);
 
     let search_params_tries = vec![
         vec![
             ("type", "master"),
-            ("artist", &release_key.artist),
-            ("release_title", &release_key.album),
+            ("artist", &artist_param),
+            ("release_title", &album),
         ],
         vec![
             ("type", "release"),
-            ("artist", &release_key.artist),
-            ("release_title", &release_key.album),
+            ("artist", &artist_param),
+            ("release_title", &album),
         ],
         vec![
             ("type", "release"),
-            ("query", &title_query),
+            ("query", &query_param),
         ],
     ];
 
@@ -228,7 +247,7 @@ fn fetch_discogs_release(
         })
         .find_map(Option::Some)
         .unwrap_or_else(|| {
-            match Question::new(format!("Can't find release for \"{} - {}\". Please enter release ID from Discogs:", release_key.artist, release_key.album).as_str())
+            match Question::new(format!("Can't find release for \"{} - {}\". Please enter release ID from Discogs:", artists.join(", "), album).as_str())
                 .ask()
             {
                 Some(Answer::RESPONSE(response)) => format!("https://api.discogs.com/releases/{}", response),
@@ -255,40 +274,40 @@ fn fetch_discogs_release(
 }
 
 fn calculate_changes(
-    source_music_files: Vec<MusicFile>,
-    discogs_releases: &HashMap<ReleaseKey, DiscogsReleaseInfo>,
+    discogs_releases: Vec<DiscogsRelease>,
     import_path: &Path,
 ) -> ChangeList {
-    let mut music_file_changes = Vec::with_capacity(source_music_files.len());
+    let mut music_file_changes = Vec::new();
     let mut cover_changes = HashSet::new();
 
-    for source in source_music_files {
-        let release_info = discogs_releases.get(&release_key(&source)).unwrap();
-        let source_tag = &*source.tag;
-        let target_tag = tag_from_discogs_info(source_tag, release_info);
-        let source_path = &source.file_path;
-        let target_folder_path = import_path.join(music_folder_path(&*target_tag));
-        let target_path = target_folder_path.join(music_file_name(
-            &*target_tag, source_path.extension().unwrap().to_str().unwrap()));
-        let bytes_to_transfer = fs::metadata(&source_path).unwrap().len();
+    for DiscogsRelease { music_files, discogs_info } in discogs_releases {
+        for music_file in music_files {
+            let source_tag = &*music_file.tag;
+            let target_tag = tag_from_discogs_info(source_tag, &discogs_info);
+            let source_path = &music_file.file_path;
+            let target_folder_path = import_path.join(music_folder_path(&*target_tag));
+            let target_path = target_folder_path.join(music_file_name(
+                &*target_tag, source_path.extension().unwrap().to_str().unwrap()));
+            let bytes_to_transfer = fs::metadata(&source_path).unwrap().len();
 
-        music_file_changes.push(MusicFileChange {
-            source,
-            target: MusicFile {
-                file_path: target_path,
-                tag: target_tag,
-            },
-            bytes_to_transfer,
-        });
-
-        if let Some(uri) = cover_uri_from_discogs_info(release_info) {
-            let uri_as_file_path = PathBuf::from(Url::parse(&uri).unwrap().path());
-            let extension = uri_as_file_path.extension().unwrap();
-            let file_name = PathBuf::from(COVER_FILE_NAME_WITHOUT_EXT).with_extension(extension);
-            cover_changes.insert(CoverChange {
-                path: target_folder_path.join(file_name),
-                uri: uri.to_owned(),
+            music_file_changes.push(MusicFileChange {
+                source: music_file,
+                target: MusicFile {
+                    file_path: target_path,
+                    tag: target_tag,
+                },
+                bytes_to_transfer,
             });
+
+            if let Some(uri) = cover_uri_from_discogs_info(&discogs_info) {
+                let uri_as_file_path = PathBuf::from(Url::parse(&uri).unwrap().path());
+                let extension = uri_as_file_path.extension().unwrap();
+                let file_name = PathBuf::from(COVER_FILE_NAME_WITHOUT_EXT).with_extension(extension);
+                cover_changes.insert(CoverChange {
+                    path: target_folder_path.join(file_name),
+                    uri: uri.to_owned(),
+                });
+            }
         }
     }
 
@@ -594,13 +613,6 @@ fn sanitize_path<S: AsRef<str>>(name: S) -> String {
     let mut options = Options::default();
     options.replacement = "-";
     sanitize_with_options(name, options)
-}
-
-fn release_key(music_file: &MusicFile) -> ReleaseKey {
-    ReleaseKey {
-        artist: music_file.tag.artist().unwrap().to_string(),
-        album: music_file.tag.album().unwrap().to_string(),
-    }
 }
 
 fn fix_discogs_artist_name(name: &str) -> &str {

@@ -361,12 +361,12 @@ fn print_changes_details(changes: &ChangeList) {
         let source_tag = &source.tag;
         let target_tag = &target.tag;
         for frame_id in target_tag.frame_ids() {
-            let source_frame_value = source_tag.frame_content_as_string(&frame_id);
-            let target_frame_value = target_tag.frame_content_as_string(&frame_id);
+            let source_frame_value = source_tag.frame_content(&frame_id).map(|v| v.stringify_content());
+            let target_frame_value = target_tag.frame_content(&frame_id).map(|v| v.stringify_content());
             if target_frame_value != source_frame_value {
                 println!(
                     "    Change {}: \"{}\" -> \"{}\"",
-                    target_tag.frame_human_readable_title(&frame_id).unwrap(),
+                    frame_id.description(),
                     source_frame_value.unwrap_or(String::from("None")),
                     target_frame_value.unwrap_or(String::from("None")),
                 );
@@ -557,7 +557,7 @@ fn tag_from_discogs_info(original_tag: &dyn Tag, info: &DiscogsReleaseInfo) -> B
             .collect::<Vec<&str>>()
             .join("; ")
     );
-    tag.set_custom_tag(DISCOGS_RELEASE_TAG.to_owned(), release["uri"].as_str().unwrap().to_owned());
+    tag.set_custom_text(DISCOGS_RELEASE_TAG.to_owned(), release["uri"].as_str().unwrap().to_owned());
     tag
 }
 

@@ -9,6 +9,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use clap::Parser;
+use dyn_clone::clone_box;
 use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use progress_streams::ProgressWriter;
@@ -282,7 +283,7 @@ fn calculate_changes(
 
     for DiscogsRelease { music_files, discogs_info } in discogs_releases {
         for music_file in music_files {
-            let source_tag = &*music_file.tag;
+            let source_tag = &music_file.tag;
             let target_tag = tag_from_discogs_info(source_tag, &discogs_info);
             let source_path = &music_file.file_path;
             let target_folder_path = import_path.join(music_folder_path(&*target_tag));
@@ -410,9 +411,8 @@ fn write_music_files(changes: &Vec<MusicFileChange>) {
             let mut temp_file = tempfile::tempfile().unwrap();
 
             io::copy(&mut source_file, &mut temp_file).unwrap();
-            temp_file.seek(io::SeekFrom::Start(0)).unwrap();
             target_tag.write_to(&mut temp_file);
-            temp_file.seek(io::SeekFrom::Start(0)).unwrap();
+
             temp_file
         };
 
@@ -422,6 +422,7 @@ fn write_music_files(changes: &Vec<MusicFileChange>) {
             File::create(&target_path).unwrap(),
             |bytes| pb.inc(bytes as u64),
         );
+        temp_file.seek(io::SeekFrom::Start(0)).unwrap();
 
         io::copy(&mut temp_file, &mut target_file).unwrap();
     }
@@ -498,7 +499,7 @@ fn download_cover(
         .unwrap();
 }
 
-fn tag_from_discogs_info(original_tag: &dyn Tag, info: &DiscogsReleaseInfo) -> Box<dyn Tag> {
+fn tag_from_discogs_info(original_tag: &Box<dyn Tag>, info: &DiscogsReleaseInfo) -> Box<dyn Tag> {
     let release = &info.json;
     let track_number = original_tag.track().unwrap();
     let track_list = release["tracklist"].as_array().unwrap().iter()
@@ -521,10 +522,12 @@ fn tag_from_discogs_info(original_tag: &dyn Tag, info: &DiscogsReleaseInfo) -> B
                 .collect::<Vec<(&str, &str)>>()
         });
 
-    let mut tag = tag::new(original_tag.kind());
-    tag.set_title(track["title"].as_str().unwrap().trim().to_owned());
-    tag.set_album(release["title"].as_str().unwrap().trim().to_owned());
-    tag.set_album_artist(
+    let mut new_tag = clone_box(&**original_tag);
+
+    new_tag.clear();
+    new_tag.set_title(track["title"].as_str().unwrap().trim().to_owned());
+    new_tag.set_album(release["title"].as_str().unwrap().trim().to_owned());
+    new_tag.set_album_artist(
         if track_artists.is_some() {
             "Various Artists".to_owned()
         } else {
@@ -537,7 +540,7 @@ fn tag_from_discogs_info(original_tag: &dyn Tag, info: &DiscogsReleaseInfo) -> B
                 .to_owned()
         }
     );
-    tag.set_artist(
+    new_tag.set_artist(
         track_artists
             .or(Some(album_artists))
             .unwrap()
@@ -548,17 +551,17 @@ fn tag_from_discogs_info(original_tag: &dyn Tag, info: &DiscogsReleaseInfo) -> B
             .trim()
             .to_owned()
     );
-    tag.set_year(release["year"].as_i64().unwrap() as i32);
-    tag.set_track(track_number);
-    tag.set_total_tracks(track_list.len() as u32);
-    tag.set_genre(
+    new_tag.set_year(release["year"].as_i64().unwrap() as i32);
+    new_tag.set_track(track_number);
+    new_tag.set_total_tracks(track_list.len() as u32);
+    new_tag.set_genre(
         release["styles"].as_array().unwrap().iter()
             .map(|v| v.as_str().unwrap().trim())
             .collect::<Vec<&str>>()
             .join("; ")
     );
-    tag.set_custom_text(DISCOGS_RELEASE_TAG.to_owned(), release["uri"].as_str().unwrap().to_owned());
-    tag
+    new_tag.set_custom_text(DISCOGS_RELEASE_TAG.to_owned(), release["uri"].as_str().unwrap().to_owned());
+    new_tag
 }
 
 fn cover_uri_from_discogs_info(info: &DiscogsReleaseInfo) -> Option<&str> {

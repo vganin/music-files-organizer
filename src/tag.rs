@@ -565,31 +565,20 @@ impl Tag for metaflac::Tag {
     }
 
     fn write_to(&self, file: &mut File) {
-        let mut tag = self.clone();
-
-        tag.remove_blocks(metaflac::BlockType::Padding);
-
-        let mut block_bytes = Vec::new();
-        let blocks: Vec<&metaflac::Block> = tag.blocks().collect();
-        for i in 0..blocks.len() {
-            let block = &blocks[i];
-            let mut writer = Vec::<u8>::new();
-            block.write_to(false, &mut writer).unwrap();
-            block_bytes.push(writer);
-        }
-
+        file.seek(io::SeekFrom::Start(0)).unwrap();
         let data = metaflac::Tag::skip_metadata(file);
 
         file.seek(io::SeekFrom::Start(0)).unwrap();
+        file.set_len(0).unwrap();
+
         file.write_all(b"fLaC").unwrap();
 
-        for bytes in block_bytes.iter() {
-            file.write_all(&bytes[..]).unwrap();
+        let blocks: Vec<&metaflac::Block> = self.blocks().collect();
+        let blocks_count = blocks.len();
+        for i in 0..blocks_count {
+            let block = blocks[i];
+            block.write_to(i == blocks_count - 1, file).unwrap();
         }
-
-        let padding_size = 1024;
-        let padding = metaflac::Block::Padding(padding_size);
-        tag.push_block(padding);
 
         file.write_all(&data[..]).unwrap();
     }

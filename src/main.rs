@@ -1,6 +1,6 @@
 extern crate core;
 
-use std::{fs, io};
+use std::{cmp, fs, io, thread, time};
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, metadata};
 use std::hash::Hash;
@@ -15,7 +15,8 @@ use itertools::Itertools;
 use progress_streams::ProgressWriter;
 use question::{Answer, Question};
 use regex::Regex;
-use reqwest::{blocking, Url};
+use reqwest::{blocking, IntoUrl, StatusCode, Url};
+use reqwest::blocking::Response;
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
 use sanitize_filename::{Options, sanitize_with_options};
 use tempfile::NamedTempFile;
@@ -326,9 +327,7 @@ fn fetch_discogs_release_info(
             pb.println(format!("Fetching {}", search_url));
 
             http_client
-                .get(search_url)
-                .send()
-                .unwrap()
+                .safe_get(search_url)
                 .json::<serde_json::Value>()
                 .unwrap()
                 ["results"][0]["resource_url"]
@@ -353,9 +352,7 @@ fn fetch_discogs_release_info(
     pb.println(format!("Fetching {}", release_url));
 
     let release_object = http_client
-        .get(release_url)
-        .send()
-        .unwrap()
+        .safe_get(release_url)
         .json::<serde_json::Value>()
         .unwrap()
         .clone();
@@ -641,9 +638,7 @@ fn download_cover(
     path: &Path,
     pb: &ProgressBar,
 ) {
-    let mut response = http_client.get(uri)
-        .send()
-        .unwrap();
+    let mut response = http_client.safe_get(uri);
 
     let mut file = &mut ProgressWriter::new(
         std::fs::File::create(&path).unwrap(),
@@ -813,4 +808,32 @@ fn default_spinner() -> ProgressBar {
     );
     pb.enable_steady_tick(PROGRESS_TICK_MS);
     pb
+}
+
+trait ClientExtension {
+    fn safe_get<T: IntoUrl + Clone>(&self, url: T) -> Response;
+}
+
+impl ClientExtension for blocking::Client {
+    fn safe_get<T: IntoUrl + Clone>(&self, url: T) -> Response {
+        loop {
+            let response = self.get(url.clone()).send().unwrap();
+            let status = response.status();
+            if status.is_success() {
+                break response;
+            } else if status == StatusCode::TOO_MANY_REQUESTS {
+                let header_as_number = |str| response.headers().get(str).unwrap().to_str().unwrap().parse::<f64>().unwrap();
+                let rate_limit = header_as_number("X-Discogs-Ratelimit");
+                let rate_limit_used = header_as_number("X-Discogs-Ratelimit-Used");
+                let skip = cmp::min_by(
+                    rate_limit_used - rate_limit,
+                    0f64,
+                    |lhs, rhs| lhs.partial_cmp(rhs).unwrap(),
+                ) + 1f64;
+                thread::sleep(time::Duration::from_secs_f64(skip * 60f64 / rate_limit));
+            } else {
+                panic!("Expected successful status code but got {}", status)
+            }
+        }
+    }
 }

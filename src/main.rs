@@ -731,7 +731,7 @@ fn tag_from_discogs_info(original_tag: &Box<dyn Tag>, info: &DiscogsReleaseInfo)
 }
 
 fn cover_uri_from_discogs_info(info: &DiscogsReleaseInfo) -> Option<&str> {
-    let images_array = info.json["images"].as_array().unwrap();
+    let images_array = info.json["images"].as_array()?;
     images_array.iter()
         .find(|v| v["type"].as_str().unwrap() == "primary")
         .map(|v| v["uri"].as_str().unwrap())

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-clap = { version = "3.1.6", features = ["derive"] }
+clap = { version = "3.1.8", features = ["derive"] }
 id3 = "1.0.2"
 mp4ameta = "0.11.0"
 metaflac = "0.2.5"
@@ -21,3 +21,4 @@ progress-streams = "1.1.0"
 tempfile = "3"
 itertools = "0.10.2"
 dyn-clone = "1.0.5"
+walkdir = "2.3.2"

@@ -8,7 +8,7 @@ use std::io::Seek;
 use std::path::Path;
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 use dyn_clone::clone_box;
 use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
@@ -19,6 +19,7 @@ use reqwest::{blocking, Url};
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
 use sanitize_filename::{Options, sanitize_with_options};
 use tempfile::NamedTempFile;
+use walkdir::WalkDir;
 
 use crate::tag::Tag;
 
@@ -32,23 +33,35 @@ const COVER_FILE_NAME_WITHOUT_EXT: &str = "cover";
 
 const PROGRESS_TICK_MS: u64 = 100u64;
 
-#[derive(Parser, Debug)]
+#[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
-struct Args {
-    #[clap(long, parse(from_os_str), name = "from")]
-    from_path: PathBuf,
-
-    #[clap(long, parse(from_os_str), name = "to")]
-    to_path: PathBuf,
-
+struct Cli {
     #[clap(long)]
     discogs_token: Option<String>,
 
-    #[clap(long)]
-    clean_target_folders: bool,
+    #[clap(subcommand)]
+    command: Command,
+}
 
-    #[clap(long)]
-    clean_source_folders: bool,
+#[derive(Subcommand)]
+enum Command {
+    Import(ImportArgs),
+    AddMissingCovers(AddMissingCoversArgs),
+}
+
+#[derive(Args)]
+struct ImportArgs {
+    #[clap(long, parse(from_os_str))]
+    from: PathBuf,
+
+    #[clap(long, parse(from_os_str))]
+    to: PathBuf,
+}
+
+#[derive(Args)]
+struct AddMissingCoversArgs {
+    #[clap(long, parse(from_os_str))]
+    to: PathBuf,
 }
 
 struct MusicFile {
@@ -90,13 +103,9 @@ struct ChangeList {
 }
 
 fn main() {
-    let args = Args::parse();
+    let cli = Cli::parse();
 
-    if !metadata(&args.from_path).unwrap().is_dir() {
-        panic!("Output path is not directory")
-    }
-
-    let discogs_token = match &args.discogs_token {
+    let discogs_token = match cli.discogs_token {
         Some(x) => x.to_owned(),
         None => {
             let discogs_token_file = get_discogs_token_file_path()
@@ -106,17 +115,27 @@ fn main() {
                 .trim().to_owned()
         }
     };
-
     let http_client = blocking::Client::new();
     let headers = common_headers(&discogs_token);
 
-    let music_files = get_music_files(&args.from_path);
+    match cli.command {
+        Command::Import(args) => import(args, &http_client, &headers),
+        Command::AddMissingCovers(args) => add_missing_covers(args, &http_client, &headers)
+    };
+}
+
+fn import(args: ImportArgs, http_client: &blocking::Client, headers: &HeaderMap) {
+    if !metadata(&args.to).unwrap().is_dir() {
+        panic!("Output path is not directory")
+    }
+
+    let music_files = get_music_files(&args.from);
     let discogs_releases = fetch_discogs_releases(&http_client, &headers, music_files);
     let changes = calculate_changes(
         discogs_releases,
-        &args.to_path,
-        args.clean_target_folders,
-        args.clean_source_folders,
+        &args.to,
+        true,
+        false,
     );
 
     if changes.music_files.is_empty() && changes.covers.is_empty() {
@@ -143,43 +162,85 @@ fn main() {
     }
 }
 
+fn add_missing_covers(args: AddMissingCoversArgs, http_client: &blocking::Client, headers: &HeaderMap) {
+    let path = args.to;
+    let pb = default_spinner();
+    let mut downloaded_covers_count = 0;
+
+    WalkDir::new(path).into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_dir())
+        .inspect(|e| {
+            pb.set_message(format!("Processing \"{}\"...", e.path().file_name().unwrap().to_str().unwrap()));
+        })
+        .filter(|e| {
+            let path = e.path();
+            for extension in ["jpg", "jpeg", "png"] {
+                if Path::exists(&path.join(COVER_FILE_NAME_WITHOUT_EXT).with_extension(extension)) {
+                    return false;
+                }
+            }
+            true
+        })
+        .for_each(|e| {
+            let path = e.path();
+            if let Some(cover_uri) = WalkDir::new(path)
+                .contents_first(true)
+                .max_depth(1)
+                .into_iter()
+                .filter_map(Result::ok)
+                .filter(|e| !e.file_type().is_dir())
+                .filter_map(|e| {
+                    let path = e.path();
+                    let format = path.extension().unwrap().to_str().unwrap();
+                    tag::read_from_path(&path, format)
+                })
+                .next()
+                .and_then(|tag| {
+                    fetch_discogs_release_info(
+                        http_client,
+                        headers,
+                        &[tag.artist().unwrap().to_string()],
+                        tag.album().unwrap(),
+                        false,
+                    )
+                })
+                .and_then(|discogs_info| {
+                    cover_uri_from_discogs_info(&discogs_info).map(ToOwned::to_owned)
+                })
+            {
+                let cover_uri_as_file_path = PathBuf::from(Url::parse(&cover_uri).unwrap().path());
+                let cover_extension = cover_uri_as_file_path.extension().unwrap();
+                let cover_file_name = PathBuf::from(COVER_FILE_NAME_WITHOUT_EXT).with_extension(cover_extension);
+                let cover_path = path.join(cover_file_name);
+                pb.set_message(format!("Downloading cover to \"{}\"", path.display()));
+                download_cover(http_client, headers, &cover_uri, &cover_path, &pb);
+                downloaded_covers_count += 1;
+            }
+        });
+
+    pb.finish_with_message(format!("Downloaded {} cover(s)", downloaded_covers_count))
+}
+
 fn get_music_files(path: impl AsRef<Path>) -> Vec<MusicFile> {
     let pb = default_spinner();
-    let result = inspect_path(path, &pb);
-    pb.finish_and_clear();
-    result
-}
-
-fn inspect_path(path: impl AsRef<Path>, pb: &ProgressBar) -> Vec<MusicFile> {
-    let file_metadata = metadata(&path).unwrap();
-    if file_metadata.is_file() {
-        vec![inspect_file(&path, pb)].into_iter().flatten().collect()
-    } else if file_metadata.is_dir() {
-        inspect_directory(&path, pb)
-    } else {
-        vec![]
-    }
-}
-
-fn inspect_directory(path: impl AsRef<Path>, pb: &ProgressBar) -> Vec<MusicFile> {
-    return fs::read_dir(path).unwrap()
-        .flat_map(|entry| {
-            let entry = entry.unwrap();
-            let path = entry.path();
-            inspect_path(&path, pb)
+    let result = WalkDir::new(path).into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| !e.file_type().is_dir())
+        .filter_map(|e| {
+            let path = e.path();
+            pb.set_message(format!("Analyzing \"{}\"...", path.file_name().unwrap().to_str().unwrap()));
+            let format = path.extension().unwrap().to_str().unwrap();
+            tag::read_from_path(&path, format).map(|tag| {
+                MusicFile {
+                    file_path: PathBuf::from(path),
+                    tag,
+                }
+            })
         })
         .collect();
-}
-
-fn inspect_file(path: impl AsRef<Path>, pb: &ProgressBar) -> Option<MusicFile> {
-    pb.set_message(format!("Analyzing \"{}\"...", path.as_ref().file_name().unwrap().to_str().unwrap()));
-    let format = path.as_ref().extension().unwrap().to_str().unwrap();
-    tag::read_from_path(&path, format).map(|tag| {
-        MusicFile {
-            file_path: PathBuf::from(path.as_ref()),
-            tag,
-        }
-    })
+    pb.finish_and_clear();
+    result
 }
 
 fn fetch_discogs_releases(
@@ -206,7 +267,13 @@ fn fetch_discogs_releases(
             albums.iter().map(|v| format!("\"{}\"", v)).join(", ")
         );
 
-        let discogs_info = fetch_discogs_release_info(http_client, headers, &artists, &albums[0]);
+        let discogs_info = fetch_discogs_release_info(
+            http_client,
+            headers,
+            &artists,
+            &albums[0],
+            true,
+        ).unwrap();
 
         result.push(DiscogsRelease {
             music_files,
@@ -222,7 +289,8 @@ fn fetch_discogs_release_info(
     headers: &HeaderMap,
     artists: &[String],
     album: &str,
-) -> DiscogsReleaseInfo {
+    ask_release_id_as_fallback: bool,
+) -> Option<DiscogsReleaseInfo> {
     println!("Searching Discogs for \"{} - {}\"", &artists.join(", "), album);
 
     let artist_param = artists.join(" ");
@@ -263,14 +331,19 @@ fn fetch_discogs_release_info(
                 .map(|v| v.to_owned())
         })
         .find_map(Option::Some)
-        .unwrap_or_else(|| {
-            match Question::new(format!("Can't find release for \"{} - {}\". Please enter release ID from Discogs:", artists.join(", "), album).as_str())
-                .ask()
-            {
-                Some(Answer::RESPONSE(response)) => format!("https://api.discogs.com/releases/{}", response),
-                _ => panic!("Abort")
+        .or_else(|| {
+            if ask_release_id_as_fallback {
+                match Question::new(format!("Can't find release for \"{} - {}\". Please enter release ID from Discogs:", artists.join(", "), album).as_str())
+                    .ask()
+                {
+                    Some(Answer::RESPONSE(response)) => Some(format!("https://api.discogs.com/releases/{}", response)),
+                    _ => None
+                }
+            } else {
+                eprintln!("Can't find release for \"{} - {}\"", &artists.join(", "), album);
+                None
             }
-        });
+        })?;
 
     println!("Fetching {}", release_url);
 
@@ -285,9 +358,9 @@ fn fetch_discogs_release_info(
 
     println!("Will use {}", release_object["uri"].as_str().unwrap());
 
-    DiscogsReleaseInfo {
+    Some(DiscogsReleaseInfo {
         json: release_object
-    }
+    })
 }
 
 fn calculate_changes(

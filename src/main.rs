@@ -169,11 +169,12 @@ fn add_missing_covers(args: AddMissingCoversArgs, http_client: &blocking::Client
     let pb = default_spinner();
     let mut downloaded_covers_count = 0;
 
-    WalkDir::new(path).into_iter()
+    WalkDir::new(&path).into_iter()
         .filter_map(Result::ok)
         .filter(|e| e.file_type().is_dir())
         .inspect(|e| {
-            pb.set_message(format!("Processing \"{}\"...", e.path().file_name().unwrap().to_str().unwrap()));
+            let display_path = e.path().strip_prefix(&path).unwrap().display();
+            pb.set_message(format!("Processing \"{}\"...", display_path));
         })
         .filter(|e| {
             let path = e.path();
@@ -216,7 +217,8 @@ fn add_missing_covers(args: AddMissingCoversArgs, http_client: &blocking::Client
                 let cover_extension = cover_uri_as_file_path.extension().unwrap();
                 let cover_file_name = PathBuf::from(COVER_FILE_NAME_WITHOUT_EXT).with_extension(cover_extension);
                 let cover_path = path.join(cover_file_name);
-                pb.set_message(format!("Downloading cover to \"{}\"", path.display()));
+                let display_path = e.path().strip_prefix(&path).unwrap().display();
+                pb.set_message(format!("Downloading cover to \"{}\"", display_path));
                 download_cover(http_client, headers, &cover_uri, &cover_path, &pb);
                 downloaded_covers_count += 1;
             }

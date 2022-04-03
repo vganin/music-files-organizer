@@ -129,8 +129,10 @@ fn import(args: ImportArgs, http_client: &blocking::Client, headers: &HeaderMap)
         panic!("Output path is not directory")
     }
 
+    let pb = default_spinner();
+
     let music_files = get_music_files(&args.from);
-    let discogs_releases = fetch_discogs_releases(&http_client, &headers, music_files);
+    let discogs_releases = fetch_discogs_releases(&http_client, &headers, music_files, &pb);
     let changes = calculate_changes(
         discogs_releases,
         &args.to,
@@ -139,7 +141,7 @@ fn import(args: ImportArgs, http_client: &blocking::Client, headers: &HeaderMap)
     );
 
     if changes.music_files.is_empty() && changes.covers.is_empty() {
-        println!("Nothing to do, all good");
+        pb.println(format!("Nothing to do, all good"));
         return;
     }
 
@@ -148,7 +150,7 @@ fn import(args: ImportArgs, http_client: &blocking::Client, headers: &HeaderMap)
         .show_defaults()
         .confirm() == Answer::YES
     {
-        print_changes_details(&changes);
+        print_changes_details(&changes, &pb);
     }
 
     if Question::new("Do you want to make changes?")
@@ -203,6 +205,7 @@ fn add_missing_covers(args: AddMissingCoversArgs, http_client: &blocking::Client
                         &[tag.artist().unwrap().to_string()],
                         tag.album().unwrap(),
                         false,
+                        &pb,
                     )
                 })
                 .and_then(|discogs_info| {
@@ -247,6 +250,7 @@ fn fetch_discogs_releases(
     http_client: &blocking::Client,
     headers: &HeaderMap,
     music_files: Vec<MusicFile>,
+    pb: &ProgressBar,
 ) -> Vec<DiscogsRelease> {
     let mut files_grouped_by_parent_path: HashMap<PathBuf, Vec<MusicFile>> = HashMap::new();
 
@@ -273,6 +277,7 @@ fn fetch_discogs_releases(
             &artists,
             &albums[0],
             true,
+            pb,
         ).unwrap();
 
         result.push(DiscogsRelease {
@@ -290,8 +295,9 @@ fn fetch_discogs_release_info(
     artists: &[String],
     album: &str,
     ask_release_id_as_fallback: bool,
+    pb: &ProgressBar,
 ) -> Option<DiscogsReleaseInfo> {
-    println!("Searching Discogs for \"{} - {}\"", &artists.join(", "), album);
+    pb.println(format!("Searching Discogs for \"{} - {}\"", &artists.join(", "), album));
 
     let artist_param = artists.join(" ");
     let query_param = format!("{} - {}", &artists.join(", "), &album);
@@ -317,7 +323,7 @@ fn fetch_discogs_release_info(
         .filter_map(|search_params| {
             let search_url = Url::parse_with_params("https://api.discogs.com/database/search", search_params).unwrap();
 
-            println!("Fetching {}", search_url);
+            pb.println(format!("Fetching {}", search_url));
 
             http_client
                 .get(search_url)
@@ -340,12 +346,12 @@ fn fetch_discogs_release_info(
                     _ => None
                 }
             } else {
-                eprintln!("Can't find release for \"{} - {}\"", &artists.join(", "), album);
+                pb.println(format!("Can't find release for \"{} - {}\"", &artists.join(", "), album));
                 None
             }
         })?;
 
-    println!("Fetching {}", release_url);
+    pb.println(format!("Fetching {}", release_url));
 
     let release_object = http_client
         .get(release_url)
@@ -356,7 +362,7 @@ fn fetch_discogs_release_info(
         .unwrap()
         .clone();
 
-    println!("Will use {}", release_object["uri"].as_str().unwrap());
+    pb.println(format!("Will use {}", release_object["uri"].as_str().unwrap()));
 
     Some(DiscogsReleaseInfo {
         json: release_object
@@ -488,7 +494,7 @@ fn find_cleanups(
     result.into_iter().collect()
 }
 
-fn print_changes_details(changes: &ChangeList) {
+fn print_changes_details(changes: &ChangeList, pb: &ProgressBar) {
     let mut step_number = 1u32;
 
     for change in &changes.music_files {
@@ -498,21 +504,21 @@ fn print_changes_details(changes: &ChangeList) {
         let source_file_path = &source.file_path;
         let target_file_path = &target.file_path;
         if source_file_path == target_file_path {
-            println!(
+            pb.println(format!(
                 "{:02}. {} \"{}\"",
                 step_number,
                 if change.transcode_to_mp4 { "Transcode" } else { "Update" },
                 source_file_path.file_name().unwrap().to_str().unwrap(),
-            );
+            ));
         } else {
             let common_file_prefix = common_path::common_path(source_file_path, target_file_path).unwrap();
-            println!(
+            pb.println(format!(
                 "{:02}. {} \"{}\" -> \"{}\"",
                 step_number,
                 if change.transcode_to_mp4 { "Transcode" } else { "Copy" },
                 source_file_path.strip_prefix(&common_file_prefix).unwrap().display(),
                 target_file_path.strip_prefix(&common_file_prefix).unwrap().display(),
-            );
+            ));
         }
 
         let source_tag = &source.tag;
@@ -521,12 +527,12 @@ fn print_changes_details(changes: &ChangeList) {
             let source_frame_value = source_tag.frame_content(&frame_id).map(|v| v.stringify_content());
             let target_frame_value = target_tag.frame_content(&frame_id).map(|v| v.stringify_content());
             if target_frame_value != source_frame_value {
-                println!(
+                pb.println(format!(
                     "    Change {}: \"{}\" -> \"{}\"",
                     frame_id.description(),
                     source_frame_value.unwrap_or(String::from("None")),
                     target_frame_value.unwrap_or(String::from("None")),
-                );
+                ));
             }
         }
 
@@ -534,21 +540,21 @@ fn print_changes_details(changes: &ChangeList) {
     }
 
     for change in &changes.covers {
-        println!(
+        pb.println(format!(
             "{:02}. Download cover by URI {} to \"{}\"",
             step_number,
             change.uri,
             change.path.display(),
-        );
+        ));
         step_number += 1;
     }
 
     for cleanup in &changes.cleanups {
-        println!(
+        pb.println(format!(
             "{:02}. ⚠️Remove \"{}\"",
             step_number,
             cleanup.path.display(),
-        );
+        ));
         step_number += 1;
     }
 }

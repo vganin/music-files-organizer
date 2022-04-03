@@ -115,16 +115,18 @@ fn main() {
                 .trim().to_owned()
         }
     };
-    let http_client = blocking::Client::new();
-    let headers = common_headers(&discogs_token);
+    let http_client = blocking::ClientBuilder::new()
+        .default_headers(common_headers(&discogs_token))
+        .build()
+        .unwrap();
 
     match cli.command {
-        Command::Import(args) => import(args, &http_client, &headers),
-        Command::AddMissingCovers(args) => add_missing_covers(args, &http_client, &headers)
+        Command::Import(args) => import(args, &http_client),
+        Command::AddMissingCovers(args) => add_missing_covers(args, &http_client)
     };
 }
 
-fn import(args: ImportArgs, http_client: &blocking::Client, headers: &HeaderMap) {
+fn import(args: ImportArgs, http_client: &blocking::Client) {
     if !metadata(&args.to).unwrap().is_dir() {
         panic!("Output path is not directory")
     }
@@ -132,7 +134,7 @@ fn import(args: ImportArgs, http_client: &blocking::Client, headers: &HeaderMap)
     let pb = default_spinner();
 
     let music_files = get_music_files(&args.from);
-    let discogs_releases = fetch_discogs_releases(&http_client, &headers, music_files, &pb);
+    let discogs_releases = fetch_discogs_releases(&http_client, music_files, &pb);
     let changes = calculate_changes(
         discogs_releases,
         &args.to,
@@ -159,12 +161,12 @@ fn import(args: ImportArgs, http_client: &blocking::Client, headers: &HeaderMap)
         .confirm() == Answer::YES
     {
         write_music_files(&changes.music_files);
-        download_covers(&changes.covers, &http_client, &headers);
+        download_covers(&changes.covers, &http_client);
         cleanup(&changes.cleanups);
     }
 }
 
-fn add_missing_covers(args: AddMissingCoversArgs, http_client: &blocking::Client, headers: &HeaderMap) {
+fn add_missing_covers(args: AddMissingCoversArgs, http_client: &blocking::Client) {
     let root_path = args.to;
     let pb = default_spinner();
     let mut downloaded_covers_count = 0;
@@ -202,7 +204,6 @@ fn add_missing_covers(args: AddMissingCoversArgs, http_client: &blocking::Client
                 .and_then(|tag| {
                     fetch_discogs_release_info(
                         http_client,
-                        headers,
                         &[tag.artist().unwrap().to_string()],
                         tag.album().unwrap(),
                         false,
@@ -219,7 +220,7 @@ fn add_missing_covers(args: AddMissingCoversArgs, http_client: &blocking::Client
                 let cover_path = path.join(cover_file_name);
                 let display_path = e.path().strip_prefix(&root_path).unwrap().display();
                 pb.set_message(format!("Downloading cover to \"{}\"", display_path));
-                download_cover(http_client, headers, &cover_uri, &cover_path, &pb);
+                download_cover(http_client, &cover_uri, &cover_path, &pb);
                 downloaded_covers_count += 1;
             }
         });
@@ -250,7 +251,6 @@ fn get_music_files(path: impl AsRef<Path>) -> Vec<MusicFile> {
 
 fn fetch_discogs_releases(
     http_client: &blocking::Client,
-    headers: &HeaderMap,
     music_files: Vec<MusicFile>,
     pb: &ProgressBar,
 ) -> Vec<DiscogsRelease> {
@@ -275,7 +275,6 @@ fn fetch_discogs_releases(
 
         let discogs_info = fetch_discogs_release_info(
             http_client,
-            headers,
             &artists,
             &albums[0],
             true,
@@ -293,7 +292,6 @@ fn fetch_discogs_releases(
 
 fn fetch_discogs_release_info(
     http_client: &blocking::Client,
-    headers: &HeaderMap,
     artists: &[String],
     album: &str,
     ask_release_id_as_fallback: bool,
@@ -329,7 +327,6 @@ fn fetch_discogs_release_info(
 
             http_client
                 .get(search_url)
-                .headers(headers.clone())
                 .send()
                 .unwrap()
                 .json::<serde_json::Value>()
@@ -357,7 +354,6 @@ fn fetch_discogs_release_info(
 
     let release_object = http_client
         .get(release_url)
-        .headers(headers.clone())
         .send()
         .unwrap()
         .json::<serde_json::Value>()
@@ -613,7 +609,6 @@ fn write_music_files(changes: &Vec<MusicFileChange>) {
 fn download_covers(
     changes: &Vec<CoverChange>,
     http_client: &blocking::Client,
-    headers: &HeaderMap,
 ) {
     if changes.is_empty() { return; };
 
@@ -622,7 +617,7 @@ fn download_covers(
 
     for (index, change) in changes.iter().enumerate() {
         pb.set_message(format!("Downloading cover {}/{}", index + 1, count));
-        download_cover(http_client, headers, &change.uri, &change.path, &pb);
+        download_cover(http_client, &change.uri, &change.path, &pb);
     }
 
     pb.finish_with_message(format!("Downloaded {} cover(s)", count))
@@ -642,13 +637,11 @@ fn cleanup(cleanups: &[Cleanup]) {
 
 fn download_cover(
     http_client: &blocking::Client,
-    headers: &HeaderMap,
     uri: &str,
     path: &Path,
     pb: &ProgressBar,
 ) {
     let mut response = http_client.get(uri)
-        .headers(headers.clone())
         .send()
         .unwrap();
 

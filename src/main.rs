@@ -18,10 +18,12 @@ use regex::Regex;
 use reqwest::{blocking, Url};
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
 use sanitize_filename::{Options, sanitize_with_options};
+use tempfile::NamedTempFile;
 
 use crate::tag::Tag;
 
 mod tag;
+mod transcode;
 
 const DISCOGS_RELEASE_TAG: &str = "DISCOGS_RELEASE";
 const DISCOGS_TOKEN_FILE_NAME: &str = ".discogs_token";
@@ -63,6 +65,7 @@ struct DiscogsRelease {
 struct MusicFileChange {
     source: MusicFile,
     target: MusicFile,
+    transcode_to_mp4: bool,
     bytes_to_transfer: u64,
 }
 
@@ -158,7 +161,8 @@ fn inspect_directory(path: impl AsRef<Path>, pb: &ProgressBar) -> Vec<MusicFile>
 
 fn inspect_file(path: impl AsRef<Path>, pb: &ProgressBar) -> Option<MusicFile> {
     pb.set_message(format!("Analyzing \"{}\"...", path.as_ref().file_name().unwrap().to_str().unwrap()));
-    tag::read_from_path(&path).map(|tag| {
+    let format = path.as_ref().extension().unwrap().to_str().unwrap();
+    tag::read_from_path(&path, format).map(|tag| {
         MusicFile {
             file_path: PathBuf::from(path.as_ref()),
             tag,
@@ -286,9 +290,11 @@ fn calculate_changes(
             let source_tag = &music_file.tag;
             let target_tag = tag_from_discogs_info(source_tag, &discogs_info);
             let source_path = &music_file.file_path;
+            let source_extension = source_path.extension().unwrap().to_str().unwrap();
+            let transcode_to_mp4 = source_extension == "flac";
             let target_folder_path = import_path.join(music_folder_path(&*target_tag));
-            let target_path = target_folder_path.join(music_file_name(
-                &*target_tag, source_path.extension().unwrap().to_str().unwrap()));
+            let target_extension = if transcode_to_mp4 { "m4a" } else { source_extension };
+            let target_path = target_folder_path.join(music_file_name(&*target_tag, target_extension));
             let bytes_to_transfer = fs::metadata(&source_path).unwrap().len();
 
             music_file_changes.push(MusicFileChange {
@@ -297,6 +303,7 @@ fn calculate_changes(
                     file_path: target_path,
                     tag: target_tag,
                 },
+                transcode_to_mp4,
                 bytes_to_transfer,
             });
 
@@ -345,15 +352,17 @@ fn print_changes_details(changes: &ChangeList) {
         let target_file_path = &target.file_path;
         if source_file_path == target_file_path {
             println!(
-                "{:02}. Update \"{}\"",
+                "{:02}. {} \"{}\"",
                 step_number,
+                if change.transcode_to_mp4 { "Transcode" } else { "Update" },
                 source_file_path.file_name().unwrap().to_str().unwrap(),
             );
         } else {
             let common_file_prefix = common_path::common_path(source_file_path, target_file_path).unwrap();
             println!(
-                "{:02}. Copy \"{}\" -> \"{}\"",
+                "{:02}. {} \"{}\" -> \"{}\"",
                 step_number,
+                if change.transcode_to_mp4 { "Transcode" } else { "Copy" },
                 source_file_path.strip_prefix(&common_file_prefix).unwrap().display(),
                 target_file_path.strip_prefix(&common_file_prefix).unwrap().display(),
             );
@@ -407,13 +416,20 @@ fn write_music_files(changes: &Vec<MusicFileChange>) {
         pb.set_message(format!("Writing \"{}\"", source_path.file_name().unwrap().to_str().unwrap()));
 
         let mut temp_file = {
-            let mut source_file = File::open(&source_path).unwrap();
-            let mut temp_file = tempfile::tempfile().unwrap();
-
-            io::copy(&mut source_file, &mut temp_file).unwrap();
-            target_tag.write_to(&mut temp_file);
-
-            temp_file
+            if change.transcode_to_mp4 {
+                let mut named_temp_file = NamedTempFile::new().unwrap();
+                transcode::to_mp4(&source_path, named_temp_file.path());
+                let mut tag = tag::read_from_path(named_temp_file.path(), "m4a").unwrap();
+                tag.set_from(target_tag);
+                tag.write_to(named_temp_file.as_file_mut());
+                named_temp_file.into_file()
+            } else {
+                let mut source_file = File::open(&source_path).unwrap();
+                let mut temp_file = tempfile::tempfile().unwrap();
+                io::copy(&mut source_file, &mut temp_file).unwrap();
+                target_tag.write_to(&mut temp_file);
+                temp_file
+            }
         };
 
         fs::create_dir_all(target_path.parent().unwrap()).unwrap();
@@ -649,4 +665,3 @@ fn default_spinner() -> ProgressBar {
     pb.enable_steady_tick(PROGRESS_TICK_MS);
     pb
 }
-

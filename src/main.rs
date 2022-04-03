@@ -45,7 +45,10 @@ struct Args {
     discogs_token: Option<String>,
 
     #[clap(long)]
-    clean: bool,
+    clean_target_folders: bool,
+
+    #[clap(long)]
+    clean_source_folders: bool,
 }
 
 struct MusicFile {
@@ -75,9 +78,15 @@ struct CoverChange {
     uri: String,
 }
 
+#[derive(Hash, PartialEq, Eq)]
+struct Cleanup {
+    path: PathBuf,
+}
+
 struct ChangeList {
     music_files: Vec<MusicFileChange>,
     covers: Vec<CoverChange>,
+    cleanups: Vec<Cleanup>,
 }
 
 fn main() {
@@ -103,7 +112,12 @@ fn main() {
 
     let music_files = get_music_files(&args.from_path);
     let discogs_releases = fetch_discogs_releases(&http_client, &headers, music_files);
-    let changes = calculate_changes(discogs_releases, &args.to_path);
+    let changes = calculate_changes(
+        discogs_releases,
+        &args.to_path,
+        args.clean_target_folders,
+        args.clean_source_folders,
+    );
 
     if changes.music_files.is_empty() && changes.covers.is_empty() {
         println!("Nothing to do, all good");
@@ -125,9 +139,7 @@ fn main() {
     {
         write_music_files(&changes.music_files);
         download_covers(&changes.covers, &http_client, &headers);
-        if args.clean {
-            clean_target_folders(&changes);
-        }
+        cleanup(&changes.cleanups);
     }
 }
 
@@ -281,6 +293,8 @@ fn fetch_discogs_release_info(
 fn calculate_changes(
     discogs_releases: Vec<DiscogsRelease>,
     import_path: &Path,
+    clean_targets: bool,
+    clean_sources: bool,
 ) -> ChangeList {
     let mut music_file_changes = Vec::new();
     let mut cover_changes = HashSet::new();
@@ -335,10 +349,70 @@ fn calculate_changes(
         }
     });
 
+    let cover_changes = cover_changes.into_iter().collect();
+
+    let cleanups = find_cleanups(
+        &music_file_changes,
+        &cover_changes,
+        clean_targets,
+        clean_sources,
+    );
+
     ChangeList {
         music_files: music_file_changes,
-        covers: cover_changes.into_iter().collect(),
+        covers: cover_changes,
+        cleanups,
     }
+}
+
+fn find_cleanups(
+    music_files: &Vec<MusicFileChange>,
+    covers: &Vec<CoverChange>,
+    clean_targets: bool,
+    clean_sources: bool,
+) -> Vec<Cleanup> {
+    let mut result = HashSet::new();
+
+    let mut source_folder_paths = HashSet::new();
+    let mut target_folder_paths = HashSet::new();
+    let mut target_paths = HashSet::new();
+
+    for change in music_files {
+        source_folder_paths.insert(PathBuf::from(change.source.file_path.parent().unwrap()));
+        target_folder_paths.insert(PathBuf::from(change.target.file_path.parent().unwrap()));
+        target_paths.insert(change.target.file_path.to_owned());
+    }
+
+    for change in covers {
+        target_folder_paths.insert(PathBuf::from(change.path.parent().unwrap()));
+        target_paths.insert(change.path.to_owned());
+    }
+
+    if clean_targets {
+        for target_folder_path in target_folder_paths {
+            target_folder_path.read_dir().unwrap().for_each(|entry| {
+                let entry = entry.unwrap();
+                let path = entry.path();
+                if !target_paths.contains(&path) {
+                    result.insert(Cleanup { path });
+                }
+            });
+        }
+    }
+
+    if clean_sources {
+        for source_folder_path in source_folder_paths {
+            source_folder_path.read_dir().unwrap().for_each(|entry| {
+                let entry = entry.unwrap();
+                let path = entry.path();
+                if !target_paths.contains(&path) {
+                    result.insert(Cleanup { path });
+                }
+            });
+        }
+    }
+
+    result.into_iter().collect()
 }
 
 fn print_changes_details(changes: &ChangeList) {
@@ -391,7 +465,16 @@ fn print_changes_details(changes: &ChangeList) {
             "{:02}. Download cover by URI {} to \"{}\"",
             step_number,
             change.uri,
-            &change.path.display(),
+            change.path.display(),
+        );
+        step_number += 1;
+    }
+
+    for cleanup in &changes.cleanups {
+        println!(
+            "{:02}. ⚠️Remove \"{}\"",
+            step_number,
+            cleanup.path.display(),
         );
         step_number += 1;
     }
@@ -464,29 +547,15 @@ fn download_covers(
     pb.finish_with_message(format!("Downloaded {} cover(s)", count))
 }
 
-fn clean_target_folders(changes: &ChangeList) {
-    let mut target_folder_paths = HashSet::new();
-    let mut target_paths = HashSet::new();
-
-    for change in &changes.music_files {
-        target_folder_paths.insert(PathBuf::from(change.target.file_path.parent().unwrap()));
-        target_paths.insert(change.target.file_path.to_owned());
-    }
-
-    for change in &changes.covers {
-        target_folder_paths.insert(PathBuf::from(change.path.parent().unwrap()));
-        target_paths.insert(change.path.to_owned());
-    }
-
-    for target_folder_path in target_folder_paths {
-        target_folder_path.read_dir().unwrap().for_each(|entry| {
-            let entry = entry.unwrap();
-            let path = entry.path();
-            if !target_paths.contains(&path) {
-                println!("{}", path.display());
-                fs::remove_file(path).unwrap()
-            }
-        });
+fn cleanup(cleanups: &[Cleanup]) {
+    for cleanup in cleanups {
+        let path = &cleanup.path;
+        let metadata = fs::metadata(path).unwrap();
+        if metadata.is_dir() {
+            fs::remove_dir_all(path).unwrap();
+        } else {
+            fs::remove_file(path).unwrap();
+        }
     }
 }
 

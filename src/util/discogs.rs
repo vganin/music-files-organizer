@@ -3,21 +3,24 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use dialoguer::Input;
+use dyn_clone::clone_box;
 use indicatif::ProgressBar;
 use itertools::Itertools;
 use progress_streams::ProgressWriter;
+use regex::Regex;
 use reqwest::{blocking, IntoUrl, StatusCode, Url};
 use reqwest::blocking::Response;
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
 
-use crate::{Console, console_print, MusicFile};
+use crate::{Console, console_print, Tag};
+use crate::command::import::MusicFile;
 
 pub struct DiscogsClient {
     client: blocking::Client,
 }
 
 pub struct DiscogsReleaseInfo {
-    pub json: serde_json::Value,
+    json: serde_json::Value,
 }
 
 pub struct DiscogsRelease {
@@ -198,6 +201,94 @@ impl DiscogsClient {
     }
 }
 
+pub fn tag_from_discogs_info(original_tag: &Box<dyn Tag>, info: &DiscogsReleaseInfo) -> Box<dyn Tag> {
+    let release = &info.json;
+    let track_number = original_tag.track().unwrap();
+    let track_list = release["tracklist"].as_array().unwrap().iter()
+        .filter(|v| v["type_"].as_str().unwrap() == "track")
+        .collect::<Vec<&serde_json::Value>>();
+    let track = track_list[track_number as usize - 1];
+    let album_artists = release["artists"].as_array().unwrap().iter()
+        .map(|v| (
+            fix_discogs_artist_name(v["name"].as_str().unwrap().trim()),
+            v["join"].as_str().unwrap_or("&")
+        ))
+        .collect::<Vec<(&str, &str)>>();
+    let track_artists = track["artists"].as_array()
+        .map(|array| {
+            array.iter()
+                .map(|v| (
+                    fix_discogs_artist_name(v["name"].as_str().unwrap().trim()),
+                    v["join"].as_str().unwrap_or("&")
+                ))
+                .collect::<Vec<(&str, &str)>>()
+        });
+
+    let mut new_tag = clone_box(&**original_tag);
+
+    new_tag.clear();
+    new_tag.set_title(track["title"].as_str().unwrap().trim().to_owned());
+    new_tag.set_album(release["title"].as_str().unwrap().trim().to_owned());
+    new_tag.set_album_artist(
+        if track_artists.is_some() {
+            "Various Artists".to_owned()
+        } else {
+            album_artists
+                .iter()
+                .flat_map(|v| [v.0, v.1])
+                .collect::<Vec<&str>>()
+                .join(" ")
+                .trim()
+                .to_owned()
+        }
+    );
+    new_tag.set_artist(
+        track_artists
+            .or(Some(album_artists))
+            .unwrap()
+            .iter()
+            .flat_map(|v| [v.0, v.1])
+            .collect::<Vec<&str>>()
+            .join(" ")
+            .trim()
+            .to_owned()
+    );
+    new_tag.set_year(release["year"].as_i64().unwrap() as i32);
+    new_tag.set_track(track_number);
+    new_tag.set_total_tracks(track_list.len() as u32);
+    new_tag.set_genre(
+        release["styles"].as_array().unwrap().iter()
+            .map(|v| v.as_str().unwrap().trim())
+            .collect::<Vec<&str>>()
+            .join("; ")
+    );
+    new_tag.set_custom_text(DISCOGS_RELEASE_TAG.to_owned(), release["uri"].as_str().unwrap().to_owned());
+    new_tag
+}
+
+pub fn cover_uri_from_discogs_info(info: &DiscogsReleaseInfo) -> Option<&str> {
+    let images_array = info.json["images"].as_array()?;
+    images_array.iter()
+        .find(|v| v["type"].as_str().unwrap() == "primary")
+        .map(|v| v["uri"].as_str().unwrap())
+        .or_else(|| {
+            images_array.iter()
+                .find(|v| v["type"].as_str().unwrap() == "secondary")
+                .map(|v| v["uri"].as_str().unwrap())
+        })
+}
+
+fn fix_discogs_artist_name(name: &str) -> &str {
+    let regex = Regex::new(r".*( \([0-9]+\))").unwrap();
+    match regex.captures(name) {
+        Some(captures) => {
+            let range = captures.get(1).unwrap().range();
+            &name[..range.start]
+        }
+        None => name
+    }
+}
+
 fn ask_discogs_release_id(reason: &str) -> String {
     Input::new()
         .with_prompt(format!("{}. Please enter Discogs release ID", reason))
@@ -217,3 +308,5 @@ fn common_headers(discogs_token: &str) -> HeaderMap {
     headers.insert(AUTHORIZATION, HeaderValue::try_from(format!("Discogs token={}", discogs_token)).unwrap());
     headers
 }
+
+const DISCOGS_RELEASE_TAG: &str = "DISCOGS_RELEASE";

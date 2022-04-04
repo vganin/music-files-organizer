@@ -29,7 +29,6 @@ mod console;
 
 const DISCOGS_RELEASE_TAG: &str = "DISCOGS_RELEASE";
 const DISCOGS_TOKEN_FILE_NAME: &str = ".discogs_token";
-
 const COVER_FILE_NAME_WITHOUT_EXT: &str = "cover";
 
 #[derive(Parser)]
@@ -55,6 +54,12 @@ struct ImportArgs {
 
     #[clap(long, parse(from_os_str))]
     to: PathBuf,
+
+    #[clap(long)]
+    dont_clean_target_folders: bool,
+
+    #[clap(long)]
+    clean_source_folders: bool,
 }
 
 #[derive(Args)]
@@ -125,8 +130,8 @@ fn import(args: ImportArgs, discogs_client: &DiscogsClient, console: &mut Consol
     let changes = calculate_changes(
         discogs_releases,
         &args.to,
-        true,
-        false,
+        !args.dont_clean_target_folders,
+        args.clean_source_folders,
     );
 
     if changes.music_files.is_empty() && changes.covers.is_empty() {

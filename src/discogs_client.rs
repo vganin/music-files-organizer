@@ -2,15 +2,15 @@ use std::{cmp, thread, time};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use dialoguer::Input;
 use indicatif::ProgressBar;
 use itertools::Itertools;
 use progress_streams::ProgressWriter;
-use question::{Answer, Question};
 use reqwest::{blocking, IntoUrl, StatusCode, Url};
 use reqwest::blocking::Response;
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
 
-use crate::MusicFile;
+use crate::{Console, console_print, MusicFile};
 
 pub struct DiscogsClient {
     client: blocking::Client,
@@ -35,11 +35,7 @@ impl DiscogsClient {
         }
     }
 
-    pub fn fetch_by_music_files(
-        &self,
-        music_files: Vec<MusicFile>,
-        pb: &ProgressBar,
-    ) -> Vec<DiscogsRelease> {
+    pub fn fetch_by_music_files(&self, music_files: Vec<MusicFile>, console: &Console) -> Vec<DiscogsRelease> {
         let mut files_grouped_by_parent_path: HashMap<PathBuf, Vec<MusicFile>> = HashMap::new();
 
         for music_file in music_files {
@@ -63,21 +59,18 @@ impl DiscogsClient {
                 self.fetch_by_release_id(
                     &ask_discogs_release_id(
                         &format!("Can't find release for \"{}\"", path.display()).as_str()),
-                    pb,
+                    console,
                 )
             } else {
                 let album = &albums[0];
-                self.fetch_by_meta(
-                    &artists,
-                    &album,
-                    pb,
-                ).or_else(|| {
-                    self.fetch_by_release_id(
-                        &ask_discogs_release_id(
-                            &format!("Can't find release for \"{} - {}\"", artists.join(", "), album)),
-                        pb,
-                    )
-                })
+                self.fetch_by_meta(&artists, &album, console)
+                    .or_else(|| {
+                        self.fetch_by_release_id(
+                            &ask_discogs_release_id(
+                                &format!("Can't find release for \"{} - {}\"", artists.join(", "), album)),
+                            console,
+                        )
+                    })
             }.unwrap();
 
             result.push(DiscogsRelease {
@@ -93,9 +86,9 @@ impl DiscogsClient {
         &self,
         artists: &[String],
         album: &str,
-        pb: &ProgressBar,
+        console: &Console,
     ) -> Option<DiscogsReleaseInfo> {
-        pb.println(format!("Searching Discogs for \"{} - {}\"", &artists.join(", "), album));
+        console_print!(console, "Searching Discogs for \"{} - {}\"", &artists.join(", "), album);
 
         let artist_param = artists.join(" ");
         let query_param = format!("{} - {}", &artists.join(", "), &album);
@@ -122,7 +115,7 @@ impl DiscogsClient {
                 let search_url = Url::parse_with_params(
                     "https://api.discogs.com/database/search", search_params).unwrap();
 
-                pb.println(format!("Fetching {}", search_url));
+                console_print!(console, "Fetching {}", search_url);
 
                 self
                     .safe_get(search_url)
@@ -134,21 +127,11 @@ impl DiscogsClient {
             })
             .find_map(Option::Some)?;
 
-        self.fetch_by_url(
-            &release_url,
-            pb,
-        )
+        self.fetch_by_url(&release_url, console)
     }
 
-    pub fn fetch_by_release_id(
-        &self,
-        release_id: &str,
-        pb: &ProgressBar,
-    ) -> Option<DiscogsReleaseInfo> {
-        self.fetch_by_url(
-            &format!("https://api.discogs.com/releases/{}", release_id),
-            pb,
-        )
+    pub fn fetch_by_release_id(&self, release_id: &str, console: &Console) -> Option<DiscogsReleaseInfo> {
+        self.fetch_by_url(&format!("https://api.discogs.com/releases/{}", release_id), console)
     }
 
     pub fn download_cover(
@@ -175,9 +158,9 @@ impl DiscogsClient {
     fn fetch_by_url(
         &self,
         release_url: &str,
-        pb: &ProgressBar,
+        console: &Console,
     ) -> Option<DiscogsReleaseInfo> {
-        pb.println(format!("Fetching {}", release_url));
+        console_print!(console, "Fetching {}", release_url);
 
         let release_object = self
             .safe_get(release_url)
@@ -185,7 +168,7 @@ impl DiscogsClient {
             .unwrap()
             .clone();
 
-        pb.println(format!("Will use {}", release_object["uri"].as_str().unwrap()));
+        console_print!(console, "Will use {}", release_object["uri"].as_str().unwrap());
 
         Some(DiscogsReleaseInfo {
             json: release_object
@@ -216,13 +199,10 @@ impl DiscogsClient {
 }
 
 fn ask_discogs_release_id(reason: &str) -> String {
-    match Question::new(format!("{}. Please enter Discogs release ID:", reason).as_str())
-        .ask()
-        .expect("Expected answer")
-    {
-        Answer::RESPONSE(response) => response,
-        _ => panic!("Cannot happen")
-    }
+    Input::new()
+        .with_prompt(format!("{}. Please enter Discogs release ID", reason))
+        .interact_text()
+        .unwrap()
 }
 
 fn common_headers(discogs_token: &str) -> HeaderMap {

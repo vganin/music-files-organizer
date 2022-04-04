@@ -9,29 +9,28 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
+use dialoguer::Confirm;
 use dyn_clone::clone_box;
-use indicatif::{ProgressBar, ProgressStyle};
 use progress_streams::ProgressWriter;
-use question::{Answer, Question};
 use regex::Regex;
 use reqwest::Url;
 use sanitize_filename::{Options, sanitize_with_options};
 use tempfile::NamedTempFile;
 use walkdir::WalkDir;
 
+use crate::console::Console;
 use crate::discogs_client::{DiscogsClient, DiscogsRelease, DiscogsReleaseInfo};
 use crate::tag::Tag;
 
 mod tag;
 mod transcode;
 mod discogs_client;
+mod console;
 
 const DISCOGS_RELEASE_TAG: &str = "DISCOGS_RELEASE";
 const DISCOGS_TOKEN_FILE_NAME: &str = ".discogs_token";
 
 const COVER_FILE_NAME_WITHOUT_EXT: &str = "cover";
-
-const PROGRESS_TICK_MS: u64 = 100u64;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -107,23 +106,22 @@ fn main() {
         }
     };
 
+    let mut console = Console::new();
     let discogs_client = DiscogsClient::new(&discogs_token);
 
     match cli.command {
-        Command::Import(args) => import(args, &discogs_client),
-        Command::AddMissingCovers(args) => add_missing_covers(args, &discogs_client)
+        Command::Import(args) => import(args, &discogs_client, &mut console),
+        Command::AddMissingCovers(args) => add_missing_covers(args, &discogs_client, &mut console)
     };
 }
 
-fn import(args: ImportArgs, discogs_client: &DiscogsClient) {
+fn import(args: ImportArgs, discogs_client: &DiscogsClient, console: &mut Console) {
     if !metadata(&args.to).unwrap().is_dir() {
         panic!("Output path is not directory")
     }
 
-    let pb = default_spinner();
-
-    let music_files = get_music_files(&args.from);
-    let discogs_releases = discogs_client.fetch_by_music_files(music_files, &pb);
+    let music_files = get_music_files(&args.from, console);
+    let discogs_releases = discogs_client.fetch_by_music_files(music_files, console);
     let changes = calculate_changes(
         discogs_releases,
         &args.to,
@@ -132,32 +130,38 @@ fn import(args: ImportArgs, discogs_client: &DiscogsClient) {
     );
 
     if changes.music_files.is_empty() && changes.covers.is_empty() {
-        pb.println(format!("Nothing to do, all good"));
+        console_print!(console, "Nothing to do, all good");
         return;
     }
 
-    if Question::new("Do you want to print changes?")
-        .default(Answer::NO)
-        .show_defaults()
-        .confirm() == Answer::YES
+    if Confirm::new()
+        .with_prompt("Do you want to print changes?")
+        .default(false)
+        .show_default(true)
+        .wait_for_newline(true)
+        .interact()
+        .unwrap()
     {
-        print_changes_details(&changes, &pb);
+        print_changes_details(&changes, console);
     }
 
-    if Question::new("Do you want to make changes?")
-        .default(Answer::YES)
-        .show_defaults()
-        .confirm() == Answer::YES
+    if Confirm::new()
+        .with_prompt("Do you want to make changes?")
+        .default(true)
+        .show_default(true)
+        .wait_for_newline(true)
+        .interact()
+        .unwrap()
     {
-        write_music_files(&changes.music_files);
-        download_covers(&discogs_client, &changes.covers);
+        write_music_files(&changes.music_files, console);
+        download_covers(&discogs_client, &changes.covers, console);
         cleanup(&changes.cleanups);
     }
 }
 
-fn add_missing_covers(args: AddMissingCoversArgs, discogs_client: &DiscogsClient) {
+fn add_missing_covers(args: AddMissingCoversArgs, discogs_client: &DiscogsClient, console: &mut Console) {
     let root_path = args.to;
-    let pb = default_spinner();
+    let pb = console.new_default_spinner();
     let mut downloaded_covers_count = 0;
 
     WalkDir::new(&root_path).into_iter()
@@ -194,7 +198,7 @@ fn add_missing_covers(args: AddMissingCoversArgs, discogs_client: &DiscogsClient
                     discogs_client.fetch_by_meta(
                         &[tag.artist().unwrap().to_string()],
                         tag.album().unwrap(),
-                        &pb,
+                        console,
                     )
                 })
                 .and_then(|discogs_info| {
@@ -215,8 +219,8 @@ fn add_missing_covers(args: AddMissingCoversArgs, discogs_client: &DiscogsClient
     pb.finish_with_message(format!("Downloaded {} cover(s)", downloaded_covers_count))
 }
 
-fn get_music_files(path: impl AsRef<Path>) -> Vec<MusicFile> {
-    let pb = default_spinner();
+fn get_music_files(path: impl AsRef<Path>, console: &mut Console) -> Vec<MusicFile> {
+    let pb = console.new_default_spinner();
     let result = WalkDir::new(path).into_iter()
         .filter_map(Result::ok)
         .filter(|e| !e.file_type().is_dir())
@@ -336,7 +340,7 @@ fn find_cleanups(
 
     if clean_targets {
         for target_folder_path in target_folder_paths {
-            target_folder_path.read_dir().unwrap().for_each(|entry| {
+            target_folder_path.read_dir().into_iter().flat_map(|v| v.into_iter()).for_each(|entry| {
                 let entry = entry.unwrap();
                 let path = entry.path();
                 if !target_paths.contains(&path) {
@@ -348,7 +352,7 @@ fn find_cleanups(
 
     if clean_sources {
         for source_folder_path in source_folder_paths {
-            source_folder_path.read_dir().unwrap().for_each(|entry| {
+            source_folder_path.read_dir().into_iter().flat_map(|v| v.into_iter()).for_each(|entry| {
                 let entry = entry.unwrap();
                 let path = entry.path();
                 if !target_paths.contains(&path) {
@@ -361,7 +365,7 @@ fn find_cleanups(
     result.into_iter().collect()
 }
 
-fn print_changes_details(changes: &ChangeList, pb: &ProgressBar) {
+fn print_changes_details(changes: &ChangeList, console: &Console) {
     let mut step_number = 1u32;
 
     for change in &changes.music_files {
@@ -371,21 +375,23 @@ fn print_changes_details(changes: &ChangeList, pb: &ProgressBar) {
         let source_file_path = &source.file_path;
         let target_file_path = &target.file_path;
         if source_file_path == target_file_path {
-            pb.println(format!(
+            console_print!(
+                console,
                 "{:02}. {} \"{}\"",
                 step_number,
                 if change.transcode_to_mp4 { "Transcode" } else { "Update" },
                 source_file_path.file_name().unwrap().to_str().unwrap(),
-            ));
+            );
         } else {
             let common_file_prefix = common_path::common_path(source_file_path, target_file_path).unwrap();
-            pb.println(format!(
+            console_print!(
+                console,
                 "{:02}. {} \"{}\" -> \"{}\"",
                 step_number,
                 if change.transcode_to_mp4 { "Transcode" } else { "Copy" },
                 source_file_path.strip_prefix(&common_file_prefix).unwrap().display(),
                 target_file_path.strip_prefix(&common_file_prefix).unwrap().display(),
-            ));
+            );
         }
 
         let source_tag = &source.tag;
@@ -394,12 +400,13 @@ fn print_changes_details(changes: &ChangeList, pb: &ProgressBar) {
             let source_frame_value = source_tag.frame_content(&frame_id).map(|v| v.stringify_content());
             let target_frame_value = target_tag.frame_content(&frame_id).map(|v| v.stringify_content());
             if target_frame_value != source_frame_value {
-                pb.println(format!(
+                console_print!(
+                    console,
                     "    Change {}: \"{}\" -> \"{}\"",
                     frame_id.description(),
                     source_frame_value.unwrap_or(String::from("None")),
                     target_frame_value.unwrap_or(String::from("None")),
-                ));
+                );
             }
         }
 
@@ -407,33 +414,35 @@ fn print_changes_details(changes: &ChangeList, pb: &ProgressBar) {
     }
 
     for change in &changes.covers {
-        pb.println(format!(
+        console_print!(
+            console,
             "{:02}. Download cover by URI {} to \"{}\"",
             step_number,
             change.uri,
             change.path.display(),
-        ));
+        );
         step_number += 1;
     }
 
     for cleanup in &changes.cleanups {
-        pb.println(format!(
+        console_print!(
+            console,
             "{:02}. ⚠️Remove \"{}\"",
             step_number,
             cleanup.path.display(),
-        ));
+        );
         step_number += 1;
     }
 }
 
-fn write_music_files(changes: &Vec<MusicFileChange>) {
+fn write_music_files(changes: &Vec<MusicFileChange>, console: &mut Console) {
     if changes.is_empty() { return; };
 
     let total_bytes_to_transfer: u64 = changes.iter()
         .map(|v| v.bytes_to_transfer)
         .sum();
 
-    let pb = default_progress_bar(total_bytes_to_transfer);
+    let pb = console.new_default_progress_bar(total_bytes_to_transfer);
 
     for change in changes {
         let source = &change.source;
@@ -478,11 +487,12 @@ fn write_music_files(changes: &Vec<MusicFileChange>) {
 fn download_covers(
     discogs_client: &DiscogsClient,
     changes: &Vec<CoverChange>,
+    console: &mut Console,
 ) {
     if changes.is_empty() { return; };
 
     let count = changes.len();
-    let pb = default_progress_bar(!0);
+    let pb = console.new_default_progress_bar(!0);
 
     for (index, change) in changes.iter().enumerate() {
         pb.set_message(format!("Downloading cover {}/{}", index + 1, count));
@@ -625,25 +635,4 @@ fn fix_discogs_artist_name(name: &str) -> &str {
         }
         None => name
     }
-}
-
-fn default_progress_bar(len: u64) -> ProgressBar {
-    let pb = ProgressBar::new(len);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("{spinner:.red/yellow} [{elapsed_precise}] [{bar:50.red/yellow}] {bytes}/{total_bytes} {wide_msg:.bold.dim}")
-            .progress_chars(":: ")
-    );
-    pb.enable_steady_tick(PROGRESS_TICK_MS);
-    pb
-}
-
-fn default_spinner() -> ProgressBar {
-    let pb = ProgressBar::new(!0);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("{spinner:.red/yellow} [{elapsed_precise}] {wide_msg:.bold.dim}")
-    );
-    pb.enable_steady_tick(PROGRESS_TICK_MS);
-    pb
 }

@@ -203,11 +203,10 @@ fn add_missing_covers(args: AddMissingCoversArgs, http_client: &blocking::Client
                 })
                 .next()
                 .and_then(|tag| {
-                    fetch_discogs_release_info(
+                    fetch_discogs_info_by_meta(
                         http_client,
                         &[tag.artist().unwrap().to_string()],
                         tag.album().unwrap(),
-                        false,
                         &pb,
                     )
                 })
@@ -265,22 +264,39 @@ fn fetch_discogs_releases(
     let mut result = Vec::new();
 
     for (path, music_files) in files_grouped_by_parent_path {
-        let artists: Vec<String> = music_files.iter().map(|v| v.tag.artist().unwrap().to_string()).unique().collect();
-        let albums: Vec<String> = music_files.iter().map(|v| v.tag.album().unwrap().to_string()).unique().collect();
+        let artists: Vec<String> = music_files.iter()
+            .filter_map(|v| v.tag.artist().map(ToString::to_string))
+            .unique()
+            .collect();
+        let albums: Vec<String> = music_files.iter()
+            .filter_map(|v| v.tag.album().map(ToString::to_string))
+            .unique()
+            .collect();
 
-        assert_eq!(
-            albums.len(), 1, "Different albums in one folder \"{}\": [{}]",
-            path.display(),
-            albums.iter().map(|v| format!("\"{}\"", v)).join(", ")
-        );
-
-        let discogs_info = fetch_discogs_release_info(
-            http_client,
-            &artists,
-            &albums[0],
-            true,
-            pb,
-        ).unwrap();
+        let discogs_info = if artists.is_empty() || albums.len() != 1 {
+            fetch_discogs_info_by_id(
+                http_client,
+                &ask_discogs_release_id(
+                    &format!("Can't find release for \"{}\"", path.display()).as_str()),
+                pb,
+            )
+        } else {
+            let album = &albums[0];
+            fetch_discogs_info_by_meta(
+                http_client,
+                &artists,
+                &album,
+                pb,
+            )
+                .or_else(|| {
+                    fetch_discogs_info_by_id(
+                        http_client,
+                        &ask_discogs_release_id(
+                            &format!("Can't find release for \"{} - {}\"", artists.join(", "), album)),
+                        pb,
+                    )
+                })
+        }.unwrap();
 
         result.push(DiscogsRelease {
             music_files,
@@ -291,11 +307,10 @@ fn fetch_discogs_releases(
     result
 }
 
-fn fetch_discogs_release_info(
+fn fetch_discogs_info_by_meta(
     http_client: &blocking::Client,
     artists: &[String],
     album: &str,
-    ask_release_id_as_fallback: bool,
     pb: &ProgressBar,
 ) -> Option<DiscogsReleaseInfo> {
     pb.println(format!("Searching Discogs for \"{} - {}\"", &artists.join(", "), album));
@@ -322,7 +337,8 @@ fn fetch_discogs_release_info(
 
     let release_url = search_params_tries.iter()
         .filter_map(|search_params| {
-            let search_url = Url::parse_with_params("https://api.discogs.com/database/search", search_params).unwrap();
+            let search_url = Url::parse_with_params(
+                "https://api.discogs.com/database/search", search_params).unwrap();
 
             pb.println(format!("Fetching {}", search_url));
 
@@ -332,23 +348,34 @@ fn fetch_discogs_release_info(
                 .unwrap()
                 ["results"][0]["resource_url"]
                 .as_str()
-                .map(|v| v.to_owned())
+                .map(ToOwned::to_owned)
         })
-        .find_map(Option::Some)
-        .or_else(|| {
-            if ask_release_id_as_fallback {
-                match Question::new(format!("Can't find release for \"{} - {}\". Please enter release ID from Discogs:", artists.join(", "), album).as_str())
-                    .ask()
-                {
-                    Some(Answer::RESPONSE(response)) => Some(format!("https://api.discogs.com/releases/{}", response)),
-                    _ => None
-                }
-            } else {
-                pb.println(format!("Can't find release for \"{} - {}\"", &artists.join(", "), album));
-                None
-            }
-        })?;
+        .find_map(Option::Some)?;
 
+    fetch_discogs_info_by_url(
+        http_client,
+        &release_url,
+        pb,
+    )
+}
+
+fn fetch_discogs_info_by_id(
+    http_client: &blocking::Client,
+    release_id: &str,
+    pb: &ProgressBar,
+) -> Option<DiscogsReleaseInfo> {
+    fetch_discogs_info_by_url(
+        http_client,
+        &format!("https://api.discogs.com/releases/{}", release_id),
+        pb,
+    )
+}
+
+fn fetch_discogs_info_by_url(
+    http_client: &blocking::Client,
+    release_url: &str,
+    pb: &ProgressBar,
+) -> Option<DiscogsReleaseInfo> {
     pb.println(format!("Fetching {}", release_url));
 
     let release_object = http_client
@@ -362,6 +389,16 @@ fn fetch_discogs_release_info(
     Some(DiscogsReleaseInfo {
         json: release_object
     })
+}
+
+fn ask_discogs_release_id(reason: &str) -> String {
+    match Question::new(format!("{}. Please enter Discogs release ID:", reason).as_str())
+        .ask()
+        .expect("Expected answer")
+    {
+        Answer::RESPONSE(response) => response,
+        _ => panic!("Cannot happen")
+    }
 }
 
 fn calculate_changes(

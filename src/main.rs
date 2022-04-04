@@ -1,7 +1,7 @@
 extern crate core;
 
-use std::{cmp, fs, io, thread, time};
-use std::collections::{HashMap, HashSet};
+use std::{fs, io};
+use std::collections::HashSet;
 use std::fs::{File, metadata};
 use std::hash::Hash;
 use std::io::Seek;
@@ -11,21 +11,20 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand};
 use dyn_clone::clone_box;
 use indicatif::{ProgressBar, ProgressStyle};
-use itertools::Itertools;
 use progress_streams::ProgressWriter;
 use question::{Answer, Question};
 use regex::Regex;
-use reqwest::{blocking, IntoUrl, StatusCode, Url};
-use reqwest::blocking::Response;
-use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
+use reqwest::Url;
 use sanitize_filename::{Options, sanitize_with_options};
 use tempfile::NamedTempFile;
 use walkdir::WalkDir;
 
+use crate::discogs_client::{DiscogsClient, DiscogsRelease, DiscogsReleaseInfo};
 use crate::tag::Tag;
 
 mod tag;
 mod transcode;
+mod discogs_client;
 
 const DISCOGS_RELEASE_TAG: &str = "DISCOGS_RELEASE";
 const DISCOGS_TOKEN_FILE_NAME: &str = ".discogs_token";
@@ -65,18 +64,9 @@ struct AddMissingCoversArgs {
     to: PathBuf,
 }
 
-struct MusicFile {
+pub struct MusicFile {
     file_path: PathBuf,
     tag: Box<dyn Tag>,
-}
-
-struct DiscogsReleaseInfo {
-    json: serde_json::Value,
-}
-
-struct DiscogsRelease {
-    music_files: Vec<MusicFile>,
-    discogs_info: DiscogsReleaseInfo,
 }
 
 struct MusicFileChange {
@@ -116,18 +106,16 @@ fn main() {
                 .trim().to_owned()
         }
     };
-    let http_client = blocking::ClientBuilder::new()
-        .default_headers(common_headers(&discogs_token))
-        .build()
-        .unwrap();
+
+    let discogs_client = DiscogsClient::new(&discogs_token);
 
     match cli.command {
-        Command::Import(args) => import(args, &http_client),
-        Command::AddMissingCovers(args) => add_missing_covers(args, &http_client)
+        Command::Import(args) => import(args, &discogs_client),
+        Command::AddMissingCovers(args) => add_missing_covers(args, &discogs_client)
     };
 }
 
-fn import(args: ImportArgs, http_client: &blocking::Client) {
+fn import(args: ImportArgs, discogs_client: &DiscogsClient) {
     if !metadata(&args.to).unwrap().is_dir() {
         panic!("Output path is not directory")
     }
@@ -135,7 +123,7 @@ fn import(args: ImportArgs, http_client: &blocking::Client) {
     let pb = default_spinner();
 
     let music_files = get_music_files(&args.from);
-    let discogs_releases = fetch_discogs_releases(&http_client, music_files, &pb);
+    let discogs_releases = discogs_client.fetch_by_music_files(music_files, &pb);
     let changes = calculate_changes(
         discogs_releases,
         &args.to,
@@ -162,12 +150,12 @@ fn import(args: ImportArgs, http_client: &blocking::Client) {
         .confirm() == Answer::YES
     {
         write_music_files(&changes.music_files);
-        download_covers(&changes.covers, &http_client);
+        download_covers(&discogs_client, &changes.covers);
         cleanup(&changes.cleanups);
     }
 }
 
-fn add_missing_covers(args: AddMissingCoversArgs, http_client: &blocking::Client) {
+fn add_missing_covers(args: AddMissingCoversArgs, discogs_client: &DiscogsClient) {
     let root_path = args.to;
     let pb = default_spinner();
     let mut downloaded_covers_count = 0;
@@ -203,8 +191,7 @@ fn add_missing_covers(args: AddMissingCoversArgs, http_client: &blocking::Client
                 })
                 .next()
                 .and_then(|tag| {
-                    fetch_discogs_info_by_meta(
-                        http_client,
+                    discogs_client.fetch_by_meta(
                         &[tag.artist().unwrap().to_string()],
                         tag.album().unwrap(),
                         &pb,
@@ -220,7 +207,7 @@ fn add_missing_covers(args: AddMissingCoversArgs, http_client: &blocking::Client
                 let cover_path = path.join(cover_file_name);
                 let display_path = e.path().strip_prefix(&root_path).unwrap().display();
                 pb.set_message(format!("Downloading cover to \"{}\"", display_path));
-                download_cover(http_client, &cover_uri, &cover_path, &pb);
+                discogs_client.download_cover(&cover_uri, &cover_path, &pb);
                 downloaded_covers_count += 1;
             }
         });
@@ -247,158 +234,6 @@ fn get_music_files(path: impl AsRef<Path>) -> Vec<MusicFile> {
         .collect();
     pb.finish_and_clear();
     result
-}
-
-fn fetch_discogs_releases(
-    http_client: &blocking::Client,
-    music_files: Vec<MusicFile>,
-    pb: &ProgressBar,
-) -> Vec<DiscogsRelease> {
-    let mut files_grouped_by_parent_path: HashMap<PathBuf, Vec<MusicFile>> = HashMap::new();
-
-    for music_file in music_files {
-        let parent_path = music_file.file_path.parent().unwrap().to_owned();
-        files_grouped_by_parent_path.entry(parent_path).or_default().push(music_file);
-    }
-
-    let mut result = Vec::new();
-
-    for (path, music_files) in files_grouped_by_parent_path {
-        let artists: Vec<String> = music_files.iter()
-            .filter_map(|v| v.tag.artist().map(ToString::to_string))
-            .unique()
-            .collect();
-        let albums: Vec<String> = music_files.iter()
-            .filter_map(|v| v.tag.album().map(ToString::to_string))
-            .unique()
-            .collect();
-
-        let discogs_info = if artists.is_empty() || albums.len() != 1 {
-            fetch_discogs_info_by_id(
-                http_client,
-                &ask_discogs_release_id(
-                    &format!("Can't find release for \"{}\"", path.display()).as_str()),
-                pb,
-            )
-        } else {
-            let album = &albums[0];
-            fetch_discogs_info_by_meta(
-                http_client,
-                &artists,
-                &album,
-                pb,
-            )
-                .or_else(|| {
-                    fetch_discogs_info_by_id(
-                        http_client,
-                        &ask_discogs_release_id(
-                            &format!("Can't find release for \"{} - {}\"", artists.join(", "), album)),
-                        pb,
-                    )
-                })
-        }.unwrap();
-
-        result.push(DiscogsRelease {
-            music_files,
-            discogs_info,
-        });
-    }
-
-    result
-}
-
-fn fetch_discogs_info_by_meta(
-    http_client: &blocking::Client,
-    artists: &[String],
-    album: &str,
-    pb: &ProgressBar,
-) -> Option<DiscogsReleaseInfo> {
-    pb.println(format!("Searching Discogs for \"{} - {}\"", &artists.join(", "), album));
-
-    let artist_param = artists.join(" ");
-    let query_param = format!("{} - {}", &artists.join(", "), &album);
-
-    let search_params_tries = vec![
-        vec![
-            ("type", "master"),
-            ("artist", &artist_param),
-            ("release_title", &album),
-        ],
-        vec![
-            ("type", "release"),
-            ("artist", &artist_param),
-            ("release_title", &album),
-        ],
-        vec![
-            ("type", "release"),
-            ("query", &query_param),
-        ],
-    ];
-
-    let release_url = search_params_tries.iter()
-        .filter_map(|search_params| {
-            let search_url = Url::parse_with_params(
-                "https://api.discogs.com/database/search", search_params).unwrap();
-
-            pb.println(format!("Fetching {}", search_url));
-
-            http_client
-                .safe_get(search_url)
-                .json::<serde_json::Value>()
-                .unwrap()
-                ["results"][0]["resource_url"]
-                .as_str()
-                .map(ToOwned::to_owned)
-        })
-        .find_map(Option::Some)?;
-
-    fetch_discogs_info_by_url(
-        http_client,
-        &release_url,
-        pb,
-    )
-}
-
-fn fetch_discogs_info_by_id(
-    http_client: &blocking::Client,
-    release_id: &str,
-    pb: &ProgressBar,
-) -> Option<DiscogsReleaseInfo> {
-    fetch_discogs_info_by_url(
-        http_client,
-        &format!("https://api.discogs.com/releases/{}", release_id),
-        pb,
-    )
-}
-
-fn fetch_discogs_info_by_url(
-    http_client: &blocking::Client,
-    release_url: &str,
-    pb: &ProgressBar,
-) -> Option<DiscogsReleaseInfo> {
-    pb.println(format!("Fetching {}", release_url));
-
-    let release_object = http_client
-        .safe_get(release_url)
-        .json::<serde_json::Value>()
-        .unwrap()
-        .clone();
-
-    pb.println(format!("Will use {}", release_object["uri"].as_str().unwrap()));
-
-    Some(DiscogsReleaseInfo {
-        json: release_object
-    })
-}
-
-fn ask_discogs_release_id(reason: &str) -> String {
-    match Question::new(format!("{}. Please enter Discogs release ID:", reason).as_str())
-        .ask()
-        .expect("Expected answer")
-    {
-        Answer::RESPONSE(response) => response,
-        _ => panic!("Cannot happen")
-    }
 }
 
 fn calculate_changes(
@@ -641,8 +476,8 @@ fn write_music_files(changes: &Vec<MusicFileChange>) {
 }
 
 fn download_covers(
+    discogs_client: &DiscogsClient,
     changes: &Vec<CoverChange>,
-    http_client: &blocking::Client,
 ) {
     if changes.is_empty() { return; };
 
@@ -651,7 +486,7 @@ fn download_covers(
 
     for (index, change) in changes.iter().enumerate() {
         pb.set_message(format!("Downloading cover {}/{}", index + 1, count));
-        download_cover(http_client, &change.uri, &change.path, &pb);
+        discogs_client.download_cover(&change.uri, &change.path, &pb);
     }
 
     pb.finish_with_message(format!("Downloaded {} cover(s)", count))
@@ -667,27 +502,6 @@ fn cleanup(cleanups: &[Cleanup]) {
             fs::remove_file(path).unwrap();
         }
     }
-}
-
-fn download_cover(
-    http_client: &blocking::Client,
-    uri: &str,
-    path: &Path,
-    pb: &ProgressBar,
-) {
-    let mut response = http_client.safe_get(uri);
-
-    let mut file = &mut ProgressWriter::new(
-        std::fs::File::create(&path).unwrap(),
-        |bytes| pb.inc(bytes as u64),
-    );
-
-    pb.set_length(response.content_length().unwrap());
-    pb.set_position(0);
-
-    response
-        .copy_to(&mut file)
-        .unwrap();
 }
 
 fn tag_from_discogs_info(original_tag: &Box<dyn Tag>, info: &DiscogsReleaseInfo) -> Box<dyn Tag> {
@@ -771,19 +585,6 @@ fn get_discogs_token_file_path() -> Option<PathBuf> {
     Some(dirs::home_dir()?.join(DISCOGS_TOKEN_FILE_NAME))
 }
 
-fn common_headers(discogs_token: &str) -> HeaderMap {
-    let mut headers = HeaderMap::new();
-    headers.insert(USER_AGENT, HeaderValue::try_from(
-        format!("{name}/{version} +{site}",
-                name = env!("CARGO_PKG_NAME"),
-                version = env!("CARGO_PKG_VERSION"),
-                site = "https://github.com/vganin/orgtag"
-        )
-    ).unwrap());
-    headers.insert(AUTHORIZATION, HeaderValue::try_from(format!("Discogs token={}", discogs_token)).unwrap());
-    headers
-}
-
 fn music_file_name(tag: &dyn Tag, ext: &str) -> String {
     sanitize_path(match tag.disc() {
         Some(disc) => format!(
@@ -845,32 +646,4 @@ fn default_spinner() -> ProgressBar {
     );
     pb.enable_steady_tick(PROGRESS_TICK_MS);
     pb
-}
-
-trait ClientExtension {
-    fn safe_get<T: IntoUrl + Clone>(&self, url: T) -> Response;
-}
-
-impl ClientExtension for blocking::Client {
-    fn safe_get<T: IntoUrl + Clone>(&self, url: T) -> Response {
-        loop {
-            let response = self.get(url.clone()).send().unwrap();
-            let status = response.status();
-            if status.is_success() {
-                break response;
-            } else if status == StatusCode::TOO_MANY_REQUESTS {
-                let header_as_number = |str| response.headers().get(str).unwrap().to_str().unwrap().parse::<f64>().unwrap();
-                let rate_limit = header_as_number("X-Discogs-Ratelimit");
-                let rate_limit_used = header_as_number("X-Discogs-Ratelimit-Used");
-                let skip = cmp::min_by(
-                    rate_limit_used - rate_limit,
-                    0f64,
-                    |lhs, rhs| lhs.partial_cmp(rhs).unwrap(),
-                ) + 1f64;
-                thread::sleep(time::Duration::from_secs_f64(skip * 60f64 / rate_limit));
-            } else {
-                panic!("Expected successful status code but got {}", status)
-            }
-        }
-    }
 }

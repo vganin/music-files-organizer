@@ -11,7 +11,7 @@ use sanitize_filename::{Options, sanitize_with_options};
 use tempfile::NamedTempFile;
 use walkdir::WalkDir;
 
-use crate::{Console, console_print, DiscogsClient, ImportArgs, Tag, tag};
+use crate::{Console, console_print, DiscogsClient, ImportArgs, pb_finish_with_message, pb_set_message, Tag, tag};
 use crate::util::discogs::{cover_uri_from_discogs_info, DiscogsRelease, tag_from_discogs_info};
 use crate::util::r#const::COVER_FILE_NAME_WITHOUT_EXTENSION;
 use crate::util::transcode;
@@ -60,7 +60,7 @@ pub fn import(args: ImportArgs, discogs_client: &DiscogsClient, console: &mut Co
     );
 
     if changes.music_files.is_empty() && changes.covers.is_empty() {
-        console_print!(console, "Nothing to do, all good");
+        console_print!(console, "{}", console::style("Nothing to do, all good").green());
         return;
     }
 
@@ -96,7 +96,8 @@ fn get_music_files(path: impl AsRef<Path>, console: &mut Console) -> Vec<MusicFi
         .filter(|e| !e.file_type().is_dir())
         .filter_map(|e| {
             let path = e.path();
-            pb.set_message(format!("Analyzing \"{}\"...", path.file_name().unwrap().to_str().unwrap()));
+            pb_set_message!(pb, "Analyzing {}",
+                console::style(path.file_name().unwrap().to_str().unwrap()).dim().bold());
             let format = path.extension().unwrap().to_str().unwrap();
             tag::read_from_path(&path, format).map(|tag| {
                 MusicFile {
@@ -197,20 +198,20 @@ fn print_changes_details(changes: &ChangeList, console: &Console) {
         if source_file_path == target_file_path {
             console_print!(
                 console,
-                "{:02}. {} \"{}\"",
+                "{:02}. {} {}",
                 step_number,
-                if change.transcode_to_mp4 { "Transcode" } else { "Update" },
-                source_file_path.file_name().unwrap().to_str().unwrap(),
+                console::style(if change.transcode_to_mp4 { "Transcode" } else { "Update" }).yellow(),
+                console::style(source_file_path.file_name().unwrap().to_str().unwrap()).dim().bold(),
             );
         } else {
             let common_file_prefix = common_path::common_path(source_file_path, target_file_path).unwrap();
             console_print!(
                 console,
-                "{:02}. {} \"{}\" -> \"{}\"",
+                "{:02}. {} {} → {}",
                 step_number,
-                if change.transcode_to_mp4 { "Transcode" } else { "Copy" },
-                source_file_path.strip_prefix(&common_file_prefix).unwrap().display(),
-                target_file_path.strip_prefix(&common_file_prefix).unwrap().display(),
+                console::style(if change.transcode_to_mp4 { "Transcode" } else { "Copy" }).green(),
+                console::style(source_file_path.strip_prefix(&common_file_prefix).unwrap().display()).dim().bold(),
+                console::style(target_file_path.strip_prefix(&common_file_prefix).unwrap().display()).dim().bold(),
             );
         }
 
@@ -222,10 +223,10 @@ fn print_changes_details(changes: &ChangeList, console: &Console) {
             if target_frame_value != source_frame_value {
                 console_print!(
                     console,
-                    "    Change {}: \"{}\" -> \"{}\"",
+                    "    {}: {} → {}",
                     frame_id.description(),
-                    source_frame_value.unwrap_or(String::from("None")),
-                    target_frame_value.unwrap_or(String::from("None")),
+                    console::style(source_frame_value.unwrap_or(String::from("None"))).red(),
+                    console::style(target_frame_value.unwrap_or(String::from("None"))).green(),
                 );
             }
         }
@@ -236,10 +237,10 @@ fn print_changes_details(changes: &ChangeList, console: &Console) {
     for change in &changes.covers {
         console_print!(
             console,
-            "{:02}. Download cover by URI {} to \"{}\"",
+            "{:02}. {} cover to {}",
             step_number,
-            change.uri,
-            change.path.display(),
+            console::style("Download").green(),
+            console::style(change.path.display()).dim().bold(),
         );
         step_number += 1;
     }
@@ -247,9 +248,10 @@ fn print_changes_details(changes: &ChangeList, console: &Console) {
     for cleanup in &changes.cleanups {
         console_print!(
             console,
-            "{:02}. ⚠️Remove \"{}\"",
+            "{:02}. {} {}",
             step_number,
-            cleanup.path.display(),
+            console::style("Remove").red().bold(),
+            console::style(cleanup.path.display()).dim().bold(),
         );
         step_number += 1;
     }
@@ -271,7 +273,8 @@ fn write_music_files(changes: &Vec<MusicFileChange>, console: &mut Console) {
         let target_path = &target.file_path;
         let target_tag = &target.tag;
 
-        pb.set_message(format!("Writing \"{}\"", source_path.file_name().unwrap().to_str().unwrap()));
+        pb_set_message!(pb, "Writing {}",
+            console::style(source_path.file_name().unwrap().to_str().unwrap()).dim().bold());
 
         let mut temp_file = {
             if change.transcode_to_mp4 {
@@ -301,7 +304,7 @@ fn write_music_files(changes: &Vec<MusicFileChange>, console: &mut Console) {
         io::copy(&mut temp_file, &mut target_file).unwrap();
     }
 
-    pb.finish_with_message(format!("Written {} file(s)", &changes.len()));
+    pb_finish_with_message!(pb, "{}", console::style(format!("Written {} file(s)", &changes.len())).green());
 }
 
 fn download_covers(
@@ -315,11 +318,11 @@ fn download_covers(
     let pb = console.new_default_progress_bar(!0);
 
     for (index, change) in changes.iter().enumerate() {
-        pb.set_message(format!("Downloading cover {}/{}", index + 1, count));
+        pb_set_message!(pb, "Downloading cover {}/{}", index + 1, count);
         discogs_client.download_cover(&change.uri, &change.path, &pb, console);
     }
 
-    pb.finish_with_message(format!("Downloaded {} cover(s)", count))
+    pb_finish_with_message!(pb, "{}", console::style(format!("Downloaded {} cover(s)", count)).green());
 }
 
 fn cleanup(cleanups: &[Cleanup]) {

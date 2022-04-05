@@ -9,6 +9,20 @@ macro_rules! console_print {
     })
 }
 
+#[macro_export]
+macro_rules! pb_set_message {
+    ($pb:expr, $($arg:tt)*) => ({
+        $pb.set_message(format!($($arg)*));
+    })
+}
+
+#[macro_export]
+macro_rules! pb_finish_with_message {
+    ($pb:expr, $($arg:tt)*) => ({
+        $pb.finish_with_message(format!($($arg)*));
+    })
+}
+
 pub struct Console {
     term: Term,
     pbs: Vec<ProgressBar>,
@@ -33,7 +47,7 @@ impl Console {
         let pb = ProgressBar::new(len);
         pb.set_style(
             ProgressStyle::default_bar()
-                .template("{spinner:.red/yellow} [{elapsed_precise}] [{bar:50.red/yellow}] {bytes}/{total_bytes} {wide_msg:.bold.dim}")
+                .template("{spinner:.red/yellow} [{elapsed_precise}] [{bar:50.red/yellow}] {bytes}/{total_bytes} {wide_msg}")
                 .progress_chars(":: ")
                 .tick_strings(TICK_STRINGS)
         );
@@ -45,7 +59,7 @@ impl Console {
         pb.set_style(
             ProgressStyle::default_bar()
                 .tick_strings(TICK_STRINGS)
-                .template("{spinner:.red/yellow} [{elapsed_precise}] {wide_msg:.bold.dim}")
+                .template("{spinner:.red/yellow} [{elapsed_precise}] {wide_msg}")
         );
         self.configure_progress_bar(pb)
     }

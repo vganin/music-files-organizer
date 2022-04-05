@@ -62,7 +62,7 @@ impl DiscogsClient {
             let discogs_info = if artists.is_empty() || albums.len() != 1 {
                 self.fetch_by_release_id(
                     &ask_discogs_release_id(
-                        &format!("Can't find release for \"{}\"", path.display()).as_str()),
+                        &format!("Can't find release for {}", console::style(path.display()).dim().bold())),
                     console,
                 )
             } else {
@@ -71,7 +71,12 @@ impl DiscogsClient {
                     .or_else(|| {
                         self.fetch_by_release_id(
                             &ask_discogs_release_id(
-                                &format!("Can't find release for \"{} - {}\"", artists.join(", "), album)),
+                                &format!(
+                                    "Can't find release for {} - {}",
+                                    console::style(artists.join(", ")).dim().bold(),
+                                    console::style(album).dim().bold()
+                                )
+                            ),
                             console,
                         )
                     })
@@ -92,7 +97,12 @@ impl DiscogsClient {
         album: &str,
         console: &Console,
     ) -> Option<DiscogsReleaseInfo> {
-        console_print!(console, "Searching Discogs for \"{} - {}\"", &artists.join(", "), album);
+        console_print!(
+            console,
+            "Searching Discogs for {} - {}",
+            console::style(&artists.join(", ")).dim().bold(),
+            console::style(album).dim().bold()
+        );
 
         let artist_param = artists.join(" ");
 

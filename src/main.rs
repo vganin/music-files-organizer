@@ -63,7 +63,7 @@ fn main() {
             let discogs_token_file = get_discogs_token_file_path()
                 .expect("Supply discogs token with commandline argument (refer to --help)");
             fs::read_to_string(&discogs_token_file).ok()
-                .expect(&format!("Supply discogs token with commandline argument (refer to --help) or with the file \"{}\"", discogs_token_file.display()))
+                .expect(&format!("Supply discogs token with commandline argument (refer to --help) or with the file {}", discogs_token_file.display()))
                 .trim().to_owned()
         }
     };

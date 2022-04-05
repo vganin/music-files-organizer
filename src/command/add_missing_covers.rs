@@ -59,7 +59,7 @@ pub fn add_missing_covers(args: AddMissingCoversArgs, discogs_client: &DiscogsCl
                 let cover_path = path.join(cover_file_name);
                 let display_path = e.path().strip_prefix(&root_path).unwrap().display();
                 pb.set_message(format!("Downloading cover to \"{}\"", display_path));
-                discogs_client.download_cover(&cover_uri, &cover_path, &pb);
+                discogs_client.download_cover(&cover_uri, &cover_path, &pb, console);
                 downloaded_covers_count += 1;
             }
         });

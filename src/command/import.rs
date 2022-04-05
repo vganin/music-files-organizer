@@ -316,7 +316,7 @@ fn download_covers(
 
     for (index, change) in changes.iter().enumerate() {
         pb.set_message(format!("Downloading cover {}/{}", index + 1, count));
-        discogs_client.download_cover(&change.uri, &change.path, &pb);
+        discogs_client.download_cover(&change.uri, &change.path, &pb, console);
     }
 
     pb.finish_with_message(format!("Downloaded {} cover(s)", count))

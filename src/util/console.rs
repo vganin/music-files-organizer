@@ -1,5 +1,5 @@
 use console::Term;
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Itertools;
 
 #[macro_export]
@@ -10,12 +10,14 @@ macro_rules! console_print {
 }
 
 pub struct Console {
+    term: Term,
     pbs: Vec<ProgressBar>,
 }
 
 impl Console {
     pub fn new() -> Self {
         Self {
+            term: Term::buffered_stdout(),
             pbs: Vec::new(),
         }
     }
@@ -49,12 +51,14 @@ impl Console {
     }
 
     fn configure_progress_bar(&mut self, pb: ProgressBar) -> ProgressBar {
+        pb.set_draw_target(ProgressDrawTarget::term(self.term.clone(), PROGRESS_REFRESH_RATE));
         pb.enable_steady_tick(PROGRESS_TICK_MS);
         self.pbs.push(pb.clone());
         pb
     }
 }
 
+const PROGRESS_REFRESH_RATE: u64 = 15u64;
 const PROGRESS_TICK_MS: u64 = 80u64;
 const TICK_STRINGS: &'static [&str] = &[
     "⠋",

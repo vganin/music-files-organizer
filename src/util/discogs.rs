@@ -95,56 +95,76 @@ impl DiscogsClient {
         console_print!(console, "Searching Discogs for \"{} - {}\"", &artists.join(", "), album);
 
         let artist_param = artists.join(" ");
-        let query_param = format!("{} - {}", &artists.join(", "), &album);
 
-        let release_url = self.search_with_params(&[
-            ("type", "master"),
-            ("artist", &artist_param),
-            ("release_title", &album),
+        let release_urls_from_master_search = self.search_with_params(&[
+            ("type", "master".to_owned()),
+            ("artist", artist_param.to_owned()),
+            ("release_title", album.to_owned()),
         ], console)
-            .and_then(|json| {
-                json["results"][0]["resource_url"]
-                    .as_str()
-                    .map(ToOwned::to_owned)
+            .into_iter()
+            .flat_map(|json| {
+                json["results"]
+                    .as_array()
+                    .unwrap()
+                    .to_owned()
             })
-            .and_then(|master_url| {
-                self.safe_get(Url::parse(&master_url).unwrap(), console)
+            .map(|json| {
+                json["resource_url"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            })
+            .filter_map(|master_url| {
+                Some(self.get_ok(Url::parse(&master_url).unwrap(), console)?
                     .json::<serde_json::Value>()
                     .unwrap()
                     ["main_release_url"]
                     .as_str()
-                    .map(ToOwned::to_owned)
-            })
-            .or_else(|| {
-                [
-                    vec![
-                        ("type", "release"),
-                        ("artist", &artist_param),
-                        ("release_title", &album),
-                    ],
-                    vec![
-                        ("type", "release"),
-                        ("query", &query_param),
-                    ],
-                ].iter()
-                    .filter_map(|search_params| {
-                        self.search_with_params(search_params, console)
-                            .unwrap()
-                            ["results"][0]["resource_url"]
-                            .as_str()
-                            .map(ToOwned::to_owned)
-                    })
-                    .find_map(Option::Some)
-            })?;
+                    .unwrap()
+                    .to_owned())
+            });
 
-        self.fetch_by_url(&release_url, console)
+        let release_urls_from_release_search = [
+            vec![
+                ("type", "release".to_owned()),
+                ("artist", artists.join(" ")),
+                ("release_title", album.to_owned()),
+            ],
+            vec![
+                ("type", "release".to_owned()),
+                ("query", format!("{} - {}", &artists.join(", "), &album)),
+            ],
+        ].to_owned()
+            .into_iter()
+            .flat_map(|search_params| {
+                self.search_with_params(&search_params, console).into_iter()
+            })
+            .flat_map(|json| {
+                json["results"]
+                    .as_array()
+                    .unwrap()
+                    .to_owned()
+            })
+            .map(|json| {
+                json["resource_url"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            });
+
+        release_urls_from_master_search
+            .chain(release_urls_from_release_search)
+            .filter_map(|release_url| {
+                self.fetch_by_url(&release_url, console)
+            })
+            .find_map(Option::Some)
     }
 
-    fn search_with_params(&self, params: &[(&str, &str)], console: &Console) -> Option<serde_json::Value> {
+    fn search_with_params(&self, params: &[(&str, String)], console: &Console) -> Option<serde_json::Value> {
         let search_url = Url::parse_with_params("https://api.discogs.com/database/search", params).unwrap();
 
         self
-            .safe_get(search_url, console)
+            .get_ok(search_url, console)?
             .json::<serde_json::Value>()
             .ok()
     }
@@ -160,7 +180,7 @@ impl DiscogsClient {
         pb: &ProgressBar,
         console: &Console,
     ) {
-        let mut response = self.safe_get(uri, console);
+        let mut response = self.get_ok(uri, console).unwrap();
 
         let mut file = &mut ProgressWriter::new(
             std::fs::File::create(&path).unwrap(),
@@ -181,10 +201,9 @@ impl DiscogsClient {
         console: &Console,
     ) -> Option<DiscogsReleaseInfo> {
         let release_object = self
-            .safe_get(release_url, console)
+            .get_ok(release_url, console)?
             .json::<serde_json::Value>()
-            .unwrap()
-            .clone();
+            .unwrap();
 
         console_print!(console, "Will use {}", release_object["uri"].as_str().unwrap());
 
@@ -193,13 +212,15 @@ impl DiscogsClient {
         })
     }
 
-    fn safe_get<T: IntoUrl + Clone + Display>(&self, url: T, console: &Console) -> Response {
+    fn get_ok<T: IntoUrl + Clone + Display>(&self, url: T, console: &Console) -> Option<Response> {
         console_print!(console, "Fetching {}", console::style(&url).dim().bold());
         loop {
             let response = self.client.get(url.clone()).send().unwrap();
             let status = response.status();
             if status.is_success() {
-                break response;
+                break Some(response);
+            } else if status == StatusCode::NOT_FOUND {
+                break None;
             } else if status == StatusCode::TOO_MANY_REQUESTS {
                 console_print!(console, "{}", console::style("Reached requests limit! Slowing down...").bold().yellow());
                 let header_as_number = |str| response.headers().get(str).unwrap().to_str().unwrap().parse::<f64>().unwrap();

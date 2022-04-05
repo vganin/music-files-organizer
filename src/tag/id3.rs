@@ -12,6 +12,7 @@ impl Tag for id3::Tag {
                     "TALB" => Some(vec![FrameId::Album]),
                     "TPE2" => Some(vec![FrameId::AlbumArtist]),
                     "TPE1" => Some(vec![FrameId::Artist]),
+                    "TYER" |
                     "TDRC" => Some(vec![FrameId::Year]),
                     "TRCK" => Some(vec![FrameId::Track, FrameId::TotalTracks]),
                     "TPOS" => Some(vec![FrameId::Disc]),
@@ -60,6 +61,9 @@ impl Tag for id3::Tag {
 
     fn year(&self) -> Option<i32> {
         id3::TagLike::date_recorded(self).map(|date| date.year)
+            .or_else(|| {
+                id3::TagLike::year(self)
+            })
     }
 
     fn set_year(&mut self, year: i32) {

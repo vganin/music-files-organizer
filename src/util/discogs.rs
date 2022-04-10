@@ -215,7 +215,7 @@ impl DiscogsClient {
             .json::<serde_json::Value>()
             .unwrap();
 
-        console_print!(console, "Will use {}", release_object["uri"].as_str().unwrap());
+        console_print!(console, "Will use {}", console::style(release_object["uri"].as_str().unwrap()).dim().bold());
 
         Some(DiscogsReleaseInfo {
             json: release_object

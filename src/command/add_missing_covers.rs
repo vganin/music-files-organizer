@@ -20,12 +20,17 @@ pub fn add_missing_covers(args: AddMissingCoversArgs, discogs_client: &DiscogsCl
             pb_set_message!(pb, "Processing {}", console::style(display_path).dim().bold());
         })
         .filter(|e| {
+            if args.force_update {
+                return true;
+            }
+
             let path = e.path();
             for extension in COVER_EXTENSIONS {
                 if Path::exists(&path.join(COVER_FILE_NAME_WITHOUT_EXTENSION).with_extension(extension)) {
                     return false;
                 }
             }
+            
             true
         })
         .for_each(|e| {

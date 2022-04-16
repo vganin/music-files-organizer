@@ -52,6 +52,9 @@ pub struct ImportArgs {
 pub struct AddMissingCoversArgs {
     #[clap(long, parse(from_os_str))]
     to: PathBuf,
+
+    #[clap(long)]
+    force_update: bool,
 }
 
 fn main() {
@@ -69,7 +72,7 @@ fn main() {
     };
 
     let discogs_client = DiscogsClient::new(&discogs_token);
-    
+
     let mut console = Console::new();
 
     match cli.command {

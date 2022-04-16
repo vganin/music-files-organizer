@@ -326,13 +326,34 @@ fn download_covers(
 }
 
 fn cleanup(cleanups: &[Cleanup]) {
+    let mut parent_dirs = HashSet::new();
+
     for cleanup in cleanups {
         let path = &cleanup.path;
+        parent_dirs.insert(path.parent().unwrap().to_owned());
         let metadata = fs::metadata(path).unwrap();
         if metadata.is_dir() {
             fs::remove_dir_all(path).unwrap();
         } else {
             fs::remove_file(path).unwrap();
+        }
+    }
+
+    for parent_dir in parent_dirs {
+        if Path::exists(&parent_dir) && parent_dir.read_dir().unwrap().next().is_none() {
+            if Confirm::new()
+                .with_prompt(format!(
+                    "Directory {} is now empty. Do you wish to remove it?",
+                    console::style(parent_dir.display()).dim().bold()
+                ))
+                .default(true)
+                .show_default(true)
+                .wait_for_newline(true)
+                .interact()
+                .unwrap()
+            {
+                fs::remove_dir_all(&parent_dir).unwrap();
+            }
         }
     }
 }

@@ -58,8 +58,12 @@ impl DiscogsClient {
                 .filter_map(|v| v.tag.album().map(ToString::to_string))
                 .unique()
                 .collect();
+            let tracks: Vec<String> = music_files.iter()
+                .filter_map(|v| v.tag.title().map(ToString::to_string))
+                .unique()
+                .collect();
 
-            let discogs_info = if artists.is_empty() || albums.len() != 1 {
+            let discogs_info = if artists.is_empty() || albums.len() != 1 || tracks.is_empty() {
                 self.fetch_by_release_id(
                     &ask_discogs_release_id(
                         &format!("Can't find release for {}", console::style(path.display()).dim().bold())),
@@ -67,7 +71,8 @@ impl DiscogsClient {
                 )
             } else {
                 let album = &albums[0];
-                self.fetch_by_meta(&artists, &album, console)
+                let track = &tracks[0];
+                self.fetch_by_meta(&artists, &album, track, console)
                     .or_else(|| {
                         self.fetch_by_release_id(
                             &ask_discogs_release_id(
@@ -95,13 +100,15 @@ impl DiscogsClient {
         &self,
         artists: &[String],
         album: &str,
+        track: &str,
         console: &Console,
     ) -> Option<DiscogsReleaseInfo> {
         console_print!(
             console,
-            "Searching Discogs for {} - {}",
+            "Searching Discogs for {} :: {} :: {}",
             console::style(&artists.join(", ")).dim().bold(),
-            console::style(album).dim().bold()
+            console::style(album).dim().bold(),
+            console::style(track).dim().bold(),
         );
 
         let artist_param = artists.join(" ");
@@ -110,6 +117,7 @@ impl DiscogsClient {
             ("type", "master".to_owned()),
             ("artist", artist_param.to_owned()),
             ("release_title", album.to_owned()),
+            ("track", track.to_owned()),
         ], console)
             .into_iter()
             .flat_map(|json| {
@@ -139,6 +147,7 @@ impl DiscogsClient {
                 ("type", "release".to_owned()),
                 ("artist", artists.join(" ")),
                 ("release_title", album.to_owned()),
+                ("track", track.to_owned()),
             ],
             vec![
                 ("type", "release".to_owned()),
@@ -327,7 +336,7 @@ pub fn cover_uri_from_discogs_info(info: &DiscogsReleaseInfo) -> Option<&str> {
 }
 
 fn fix_discogs_artist_name(name: &str) -> &str {
-    let regex = Regex::new(r".*( \([0-9]+\))").unwrap();
+    let regex = Regex::new(r".*( \(\d+\))").unwrap();
     match regex.captures(name) {
         Some(captures) => {
             let range = captures.get(1).unwrap().range();

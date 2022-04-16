@@ -5,7 +5,7 @@ use std::io::Seek;
 use std::path::{Path, PathBuf};
 
 use dialoguer::Confirm;
-use progress_streams::ProgressWriter;
+use progress_streams::{ProgressReader, ProgressWriter};
 use reqwest::Url;
 use sanitize_filename::{Options, sanitize_with_options};
 use tempfile::NamedTempFile;
@@ -25,7 +25,7 @@ struct MusicFileChange {
     source: MusicFile,
     target: MusicFile,
     transcode_to_mp4: bool,
-    bytes_to_transfer: u64,
+    source_file_len: u64,
 }
 
 #[derive(Hash, PartialEq, Eq)]
@@ -139,7 +139,7 @@ fn calculate_changes(
                     tag: target_tag,
                 },
                 transcode_to_mp4,
-                bytes_to_transfer,
+                source_file_len: bytes_to_transfer,
             });
 
             if let Some(uri) = cover_uri_from_discogs_info(&discogs_info) {
@@ -261,7 +261,7 @@ fn write_music_files(changes: &Vec<MusicFileChange>, console: &mut Console) {
     if changes.is_empty() { return; };
 
     let total_bytes_to_transfer: u64 = changes.iter()
-        .map(|v| v.bytes_to_transfer)
+        .map(|v| v.source_file_len)
         .sum();
 
     let pb = console.new_default_progress_bar(total_bytes_to_transfer);
@@ -276,30 +276,38 @@ fn write_music_files(changes: &Vec<MusicFileChange>, console: &mut Console) {
         pb_set_message!(pb, "Writing {}",
             console::style(source_path.file_name().unwrap().to_str().unwrap()).dim().bold());
 
-        let mut temp_file = {
-            if change.transcode_to_mp4 {
-                let mut named_temp_file = NamedTempFile::new().unwrap();
-                transcode::to_mp4(&source_path, named_temp_file.path());
-                let mut tag = tag::read_from_path(named_temp_file.path(), "m4a").unwrap();
-                tag.set_from(target_tag);
-                tag.write_to(named_temp_file.as_file_mut());
-                named_temp_file.into_file()
-            } else {
-                let mut source_file = File::open(&source_path).unwrap();
-                let mut temp_file = tempfile::tempfile().unwrap();
-                io::copy(&mut source_file, &mut temp_file).unwrap();
-                target_tag.write_to(&mut temp_file);
-                temp_file
-            }
-        };
-
         fs::create_dir_all(target_path.parent().unwrap()).unwrap();
 
+        let mut temp_file = if change.transcode_to_mp4 {
+            let mut named_temp_file = NamedTempFile::new().unwrap();
+            transcode::to_mp4(
+                &source_path,
+                named_temp_file.path(),
+                |bytes| pb.inc(bytes as u64 / 2),
+            );
+            let mut tag = tag::read_from_path(named_temp_file.path(), "m4a").unwrap();
+            tag.set_from(target_tag);
+            tag.write_to(named_temp_file.as_file_mut());
+            named_temp_file.into_file()
+        } else {
+            let mut source_file = ProgressReader::new(
+                File::open(&source_path).unwrap(),
+                |bytes| pb.inc(bytes as u64 / 2),
+            );
+            let mut temp_file = tempfile::tempfile().unwrap();
+            io::copy(&mut source_file, &mut temp_file).unwrap();
+            target_tag.write_to(&mut temp_file);
+            temp_file
+        };
+
+        temp_file.seek(io::SeekFrom::Start(0)).unwrap();
+
+        let source_file_len = change.source_file_len;
+        let temp_file_len = temp_file.metadata().unwrap().len();
         let mut target_file = ProgressWriter::new(
             File::create(&target_path).unwrap(),
-            |bytes| pb.inc(bytes as u64),
+            |bytes| pb.inc(bytes as u64 * source_file_len / temp_file_len / 2),
         );
-        temp_file.seek(io::SeekFrom::Start(0)).unwrap();
 
         io::copy(&mut temp_file, &mut target_file).unwrap();
     }

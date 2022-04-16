@@ -3,22 +3,24 @@ use std::path::Path;
 use ffmpeg::{codec, filter, format, frame, media};
 use ffmpeg::Dictionary;
 
-pub fn to_mp4(input: &Path, output: &Path) {
+pub fn to_mp4<ProgressCallback: Fn(usize)>(input: &Path, output: &Path, callback: ProgressCallback) {
     transcode(
         input,
         output,
         "mp4",
         "libfdk_aac",
         [("cutoff", "20000"), ("afterburner", "1")],
+        callback,
     );
 }
 
-fn transcode<'a, T: IntoIterator<Item=(&'a str, &'a str)>>(
+fn transcode<'a, T: IntoIterator<Item=(&'a str, &'a str)>, PC: Fn(usize)>(
     input: &Path,
     output: &Path,
     output_format: &str,
     output_codec: &str,
     output_extra_options: T,
+    callback: PC,
 ) {
     ffmpeg::init().unwrap();
 
@@ -35,6 +37,7 @@ fn transcode<'a, T: IntoIterator<Item=(&'a str, &'a str)>>(
             packet.rescale_ts(stream.time_base(), transcoder.in_time_base);
             transcoder.send_packet_to_decoder(&packet);
             transcoder.receive_and_process_decoded_frames(&mut output_format);
+            callback(packet.size())
         }
     }
 

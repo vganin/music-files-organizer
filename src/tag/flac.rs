@@ -86,7 +86,7 @@ impl Tag for metaflac::Tag {
 
     fn track(&self) -> Option<u32> {
         metaflac::Tag::vorbis_comments(self)
-            .map(|v| v.track())
+            .map(|v| v.track().or_else(|| Some(vorbis_comment_as_pair(v, FLAC_TRACK)?.0)))
             .flatten()
     }
 
@@ -96,7 +96,7 @@ impl Tag for metaflac::Tag {
 
     fn total_tracks(&self) -> Option<u32> {
         metaflac::Tag::vorbis_comments(self)
-            .map(|v| v.total_tracks())
+            .map(|v| v.total_tracks().or_else(|| vorbis_comment_as_pair(v, FLAC_TRACK)?.1))
             .flatten()
     }
 
@@ -168,6 +168,14 @@ impl Tag for metaflac::Tag {
 
         file.write_all(&data[..]).unwrap();
     }
+}
+
+fn vorbis_comment_as_pair(tag: &metaflac::block::VorbisComment, id: &str) -> Option<(u32, Option<u32>)> {
+    let text = tag.get(id)?.first()?;
+    let mut split = text.splitn(2, &['\0', '/'][..]);
+    let a = split.next()?.parse().ok()?;
+    let b = split.next().and_then(|s| s.parse().ok());
+    Some((a, b))
 }
 
 const FLAC_TITLE: &str = "TITLE";

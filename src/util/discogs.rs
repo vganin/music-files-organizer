@@ -314,7 +314,7 @@ pub fn tag_from_discogs_info(original_tag: &Box<dyn Tag>, info: &DiscogsReleaseI
     new_tag.set_track(track_number);
     new_tag.set_total_tracks(track_list.len() as u32);
     new_tag.set_genre(
-        release["styles"].as_array().unwrap().iter()
+        release["styles"].as_array().unwrap_or(&vec![]).iter()
             .map(|v| v.as_str().unwrap().trim())
             .collect::<Vec<&str>>()
             .join("; ")

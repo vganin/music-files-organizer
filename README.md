@@ -11,4 +11,6 @@ Home project to import music into my media library.
 - Download cover art to album folder
 
 ## Before first build
-`sudo apt install libfdk-aac-dev`
+The library builds custom ffmpeg with proprietary codec Fraunhofer FDK AAC so need to install some dependencies first.
+### Debian/Ubuntu
+`sudo apt install yasm libfdk-aac-dev`

@@ -66,7 +66,7 @@ impl DiscogsClient {
             let discogs_info = if artists.is_empty() || albums.len() != 1 || tracks.is_empty() {
                 self.fetch_by_release_id(
                     &ask_discogs_release_id(
-                        &format!("Can't find release for {}", console::style(path.display()).dim().bold())),
+                        &format!("Can't find release for {}", console::style(path.display()).bold())),
                     console,
                 )
             } else {
@@ -78,8 +78,8 @@ impl DiscogsClient {
                             &ask_discogs_release_id(
                                 &format!(
                                     "Can't find release for {} - {}",
-                                    console::style(artists.join(", ")).dim().bold(),
-                                    console::style(album).dim().bold()
+                                    console::style(artists.join(", ")).bold(),
+                                    console::style(album).bold()
                                 )
                             ),
                             console,
@@ -106,9 +106,9 @@ impl DiscogsClient {
         console_print!(
             console,
             "Searching Discogs for {} :: {} :: {}",
-            console::style(&artists.join(", ")).dim().bold(),
-            console::style(album).dim().bold(),
-            console::style(track).dim().bold(),
+            console::style(&artists.join(", ")).bold(),
+            console::style(album).bold(),
+            console::style(track).bold(),
         );
 
         let artist_param = artists.join(" ");
@@ -176,7 +176,7 @@ impl DiscogsClient {
             .filter_map(|release_url| {
                 self.fetch_by_url(&release_url, console)
             })
-            .find_map(Option::Some)
+            .find_map(Some)
     }
 
     fn search_with_params(&self, params: &[(&str, String)], console: &Console) -> Option<serde_json::Value> {
@@ -224,7 +224,7 @@ impl DiscogsClient {
             .json::<serde_json::Value>()
             .unwrap();
 
-        console_print!(console, "Will use {}", console::style(release_object["uri"].as_str().unwrap()).dim().bold());
+        console_print!(console, "Will use {}", console::style(release_object["uri"].as_str().unwrap()).bold());
 
         Some(DiscogsReleaseInfo {
             json: release_object
@@ -232,7 +232,7 @@ impl DiscogsClient {
     }
 
     fn get_ok<T: IntoUrl + Clone + Display>(&self, url: T, console: &Console) -> Option<Response> {
-        console_print!(console, "Fetching {}", console::style(&url).dim().bold());
+        console_print!(console, "Fetching {}", console::style(&url).bold());
         loop {
             let response = self.client.get(url.clone()).send().unwrap();
             let status = response.status();

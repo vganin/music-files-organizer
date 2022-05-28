@@ -97,7 +97,7 @@ fn get_music_files(path: impl AsRef<Path>, console: &mut Console) -> Vec<MusicFi
         .filter_map(|e| {
             let path = e.path();
             pb_set_message!(pb, "Analyzing {}",
-                console::style(path.file_name().unwrap().to_str().unwrap()).dim().bold());
+                console::style(path.file_name().unwrap().to_str().unwrap()).bold());
             let format = path.extension().unwrap().to_str().unwrap();
             tag::read_from_path(&path, format).map(|tag| {
                 MusicFile {
@@ -201,7 +201,7 @@ fn print_changes_details(changes: &ChangeList, console: &Console) {
                 "{:02}. {} {}",
                 step_number,
                 console::style(if change.transcode_to_mp4 { "Transcode" } else { "Update" }).yellow(),
-                console::style(source_file_path.file_name().unwrap().to_str().unwrap()).dim().bold(),
+                console::style(source_file_path.file_name().unwrap().to_str().unwrap()).bold(),
             );
         } else {
             let common_file_prefix = common_path::common_path(source_file_path, target_file_path).unwrap();
@@ -210,8 +210,8 @@ fn print_changes_details(changes: &ChangeList, console: &Console) {
                 "{:02}. {} {} → {}",
                 step_number,
                 console::style(if change.transcode_to_mp4 { "Transcode" } else { "Copy" }).green(),
-                console::style(source_file_path.strip_prefix(&common_file_prefix).unwrap().display()).dim().bold(),
-                console::style(target_file_path.strip_prefix(&common_file_prefix).unwrap().display()).dim().bold(),
+                console::style(source_file_path.strip_prefix(&common_file_prefix).unwrap().display()).bold(),
+                console::style(target_file_path.strip_prefix(&common_file_prefix).unwrap().display()).bold(),
             );
         }
 
@@ -240,7 +240,7 @@ fn print_changes_details(changes: &ChangeList, console: &Console) {
             "{:02}. {} cover to {}",
             step_number,
             console::style("Download").green(),
-            console::style(change.path.display()).dim().bold(),
+            console::style(change.path.display()).bold(),
         );
         step_number += 1;
     }
@@ -251,7 +251,7 @@ fn print_changes_details(changes: &ChangeList, console: &Console) {
             "{:02}. {} {}",
             step_number,
             console::style("Remove").red().bold(),
-            console::style(cleanup.path.display()).dim().bold(),
+            console::style(cleanup.path.display()).bold(),
         );
         step_number += 1;
     }
@@ -274,7 +274,7 @@ fn write_music_files(changes: &Vec<MusicFileChange>, console: &mut Console) {
         let target_tag = &target.tag;
 
         pb_set_message!(pb, "Writing {}",
-            console::style(source_path.file_name().unwrap().to_str().unwrap()).dim().bold());
+            console::style(source_path.file_name().unwrap().to_str().unwrap()).bold());
 
         fs::create_dir_all(target_path.parent().unwrap()).unwrap();
 
@@ -352,7 +352,7 @@ fn cleanup(cleanups: &[Cleanup]) {
             if Confirm::new()
                 .with_prompt(format!(
                     "Directory {} is now empty. Do you wish to remove it?",
-                    console::style(parent_dir.display()).dim().bold()
+                    console::style(parent_dir.display()).bold()
                 ))
                 .default(true)
                 .show_default(true)

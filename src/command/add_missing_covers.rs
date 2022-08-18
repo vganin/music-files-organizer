@@ -52,6 +52,7 @@ pub fn add_missing_covers(args: AddMissingCoversArgs, discogs_client: &DiscogsCl
                         &[tag.artist().unwrap().to_string()],
                         tag.album().unwrap(),
                         tag.title().unwrap(),
+                        tag.total_tracks().unwrap() as usize,
                         console,
                     )
                 })

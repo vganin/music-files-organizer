@@ -72,7 +72,7 @@ impl DiscogsClient {
             } else {
                 let album = &albums[0];
                 let track = &tracks[0];
-                self.fetch_by_meta(&artists, &album, track, console)
+                self.fetch_by_meta(&artists, &album, track, tracks.len(), console)
                     .or_else(|| {
                         self.fetch_by_release_id(
                             &ask_discogs_release_id(
@@ -86,6 +86,8 @@ impl DiscogsClient {
                         )
                     })
             }.unwrap();
+
+            console_print!(console, "Will use {}", console::style(discogs_info.json["uri"].as_str().unwrap()).bold());
 
             result.push(DiscogsRelease {
                 music_files,
@@ -101,6 +103,7 @@ impl DiscogsClient {
         artists: &[String],
         album: &str,
         track: &str,
+        track_count: usize,
         console: &Console,
     ) -> Option<DiscogsReleaseInfo> {
         console_print!(
@@ -171,12 +174,15 @@ impl DiscogsClient {
                     .to_owned()
             });
 
-        release_urls_from_master_search
+        let release_object = release_urls_from_master_search
             .chain(release_urls_from_release_search)
             .filter_map(|release_url| {
                 self.fetch_by_url(&release_url, console)
+                    .filter(|info| info.json["tracklist"].as_array().unwrap().len() == track_count)
             })
-            .find_map(Some)
+            .find_map(Some);
+
+        release_object
     }
 
     fn search_with_params(&self, params: &[(&str, String)], console: &Console) -> Option<serde_json::Value> {
@@ -223,8 +229,6 @@ impl DiscogsClient {
             .get_ok(release_url, console)?
             .json::<serde_json::Value>()
             .unwrap();
-
-        console_print!(console, "Will use {}", console::style(release_object["uri"].as_str().unwrap()).bold());
 
         Some(DiscogsReleaseInfo {
             json: release_object

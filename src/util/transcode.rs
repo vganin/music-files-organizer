@@ -1,3 +1,5 @@
+extern crate ffmpeg_next as ffmpeg;
+
 use std::path::Path;
 
 use ffmpeg::{codec, filter, format, frame, media};
@@ -25,14 +27,13 @@ fn transcode<'a, T: IntoIterator<Item=(&'a str, &'a str)>, PC: Fn(usize)>(
     ffmpeg::init().unwrap();
 
     let mut input_format = format::input(&input).unwrap();
-    let mut output_format = format::output_as(&output, format::output::by_name(output_format).next().unwrap()).unwrap();
+    let mut output_format = format::output_as(&output, output_format).unwrap();
     let mut transcoder = transcoder(&mut input_format, &mut output_format, output_codec, output_extra_options, "anull").unwrap();
 
     output_format.set_metadata(input_format.metadata().to_owned());
     output_format.write_header().unwrap();
 
-    for res in input_format.packets() {
-        let (stream, mut packet) = res.unwrap();
+    for (stream, mut packet) in input_format.packets() {
         if stream.index() == transcoder.stream {
             packet.rescale_ts(stream.time_base(), transcoder.in_time_base);
             transcoder.send_packet_to_decoder(&packet);
@@ -64,7 +65,8 @@ fn transcoder<'a>(
         .streams()
         .best(media::Type::Audio)
         .expect("could not find best audio stream");
-    let mut decoder = input.codec().decoder().audio()?;
+    let context = codec::context::Context::from_parameters(input.parameters())?;
+    let mut decoder = context.decoder().audio()?;
     let codec = ffmpeg::encoder::find_by_name(output_codec)
         .expect("failed to find encoder")
         .audio()?;
@@ -76,7 +78,8 @@ fn transcoder<'a>(
     decoder.set_parameters(input.parameters())?;
 
     let mut output = output_format.add_stream(codec)?;
-    let mut encoder = output.codec().encoder().audio()?;
+    let context = ffmpeg::codec::context::Context::from_parameters(output.parameters())?;
+    let mut encoder = context.encoder().audio()?;
 
     let channel_layout = codec
         .channel_layouts()
@@ -87,15 +90,15 @@ fn transcoder<'a>(
         encoder.set_flags(ffmpeg::codec::flag::Flags::GLOBAL_HEADER);
     }
 
-    encoder.set_sample_rate(decoder.sample_rate());
+    encoder.set_rate(decoder.rate() as i32);
     encoder.set_channel_layout(channel_layout);
     encoder.set_channels(channel_layout.channels());
     encoder.set_format(codec.formats().expect("unknown supported formats").next().unwrap());
     encoder.set_bit_rate(decoder.bit_rate());
     encoder.set_max_bit_rate(decoder.max_bit_rate());
 
-    encoder.set_time_base((1, decoder.sample_rate() as i32));
-    output.set_time_base((1, decoder.sample_rate() as i32));
+    encoder.set_time_base((1, decoder.rate() as i32));
+    output.set_time_base((1, decoder.rate() as i32));
 
     let encoder = encoder.open_as_with(codec, Dictionary::from_iter(output_codec_options))?;
     output.set_parameters(&encoder);
@@ -125,7 +128,7 @@ fn filter(
     let args = format!(
         "time_base={}:sample_rate={}:sample_fmt={}:channel_layout=0x{:x}",
         decoder.time_base(),
-        decoder.sample_rate(),
+        decoder.rate(),
         decoder.format().name(),
         decoder.channel_layout().bits()
     );
@@ -138,7 +141,7 @@ fn filter(
 
         out.set_sample_format(encoder.format());
         out.set_channel_layout(encoder.channel_layout());
-        out.set_sample_rate(encoder.sample_rate());
+        out.set_sample_rate(encoder.rate());
     }
 
     filter.output("in", 0)?.input("out", 0)?.parse(spec)?;

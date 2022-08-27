@@ -178,7 +178,7 @@ impl DiscogsClient {
             .chain(release_urls_from_release_search)
             .filter_map(|release_url| {
                 self.fetch_by_url(&release_url, console)
-                    .filter(|info| info.json["tracklist"].as_array().unwrap().len() == track_count)
+                    .filter(|info| track_list(&info.json).len() == track_count)
             })
             .find_map(Some);
 
@@ -265,9 +265,7 @@ impl DiscogsClient {
 pub fn tag_from_discogs_info(original_tag: &Box<dyn Tag>, info: &DiscogsReleaseInfo) -> Box<dyn Tag> {
     let release = &info.json;
     let track_number = original_tag.track().unwrap();
-    let track_list = release["tracklist"].as_array().unwrap().iter()
-        .filter(|v| v["type_"].as_str().unwrap() == "track")
-        .collect::<Vec<&serde_json::Value>>();
+    let track_list = track_list(&info.json);
     let track = track_list[track_number as usize - 1];
     let album_artists = release["artists"].as_array().unwrap().iter()
         .map(|v| (
@@ -368,6 +366,12 @@ fn common_headers(discogs_token: &str) -> HeaderMap {
     ).unwrap());
     headers.insert(AUTHORIZATION, HeaderValue::try_from(format!("Discogs token={}", discogs_token)).unwrap());
     headers
+}
+
+fn track_list(release_object: &serde_json::Value) -> Vec<&serde_json::Value> {
+    release_object["tracklist"].as_array().unwrap().iter()
+        .filter(|v| v["type_"].as_str().unwrap() == "track")
+        .collect::<Vec<&serde_json::Value>>()
 }
 
 const DISCOGS_RELEASE_TAG: &str = "DISCOGS_RELEASE";

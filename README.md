@@ -12,5 +12,10 @@ Home project to import music into my media library.
 
 ## Before first build
 The library builds custom ffmpeg with proprietary codec Fraunhofer FDK AAC so need to install some dependencies first.
-### Debian/Ubuntu
+### Debian | Ubuntu | Apt
 `sudo apt install yasm libfdk-aac-dev`
+
+### macOS | Brew
+`brew install fdk-aac`
+
+⚠️ Be aware that on Apple Silicon the installed libraries are not included in standard search paths for LD, so you need to add it yourself (e.g. using `RUSTFLAGS=-L$(brew --prefix)/lib`). See https://github.com/Homebrew/brew/issues/13481 for the discussion.

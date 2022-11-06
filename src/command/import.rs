@@ -204,7 +204,8 @@ fn print_changes_details(changes: &ChangeList, console: &Console) {
                 console::style(source_file_path.file_name().unwrap().to_str().unwrap()).bold(),
             );
         } else {
-            let common_file_prefix = common_path::common_path(source_file_path, target_file_path).unwrap();
+            let common_file_prefix = common_path::common_path(source_file_path, target_file_path)
+                .unwrap_or(PathBuf::new());
             console_print!(
                 console,
                 "{:02}. {} {} → {}",

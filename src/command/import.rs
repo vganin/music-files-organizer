@@ -1,5 +1,6 @@
 use std::{fs, io};
 use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::Seek;
 use std::path::{Path, PathBuf};
@@ -98,7 +99,7 @@ fn get_music_files(path: impl AsRef<Path>, console: &mut Console) -> Vec<MusicFi
             let path = e.path();
             pb_set_message!(pb, "Analyzing {}",
                 console::style(path.file_name().unwrap().to_str().unwrap()).bold());
-            let format = path.extension().unwrap().to_str().unwrap();
+            let format = path.extension().unwrap_or(OsStr::new("")).to_str().unwrap();
             tag::read_from_path(&path, format).map(|tag| {
                 MusicFile {
                     file_path: PathBuf::from(path),

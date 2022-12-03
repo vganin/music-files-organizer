@@ -3,9 +3,12 @@ use std::io;
 use std::io::{Seek, Write};
 use std::path::Path;
 
+use anyhow::{Context, Result};
 use dyn_clone::DynClone;
 
 use frame::*;
+
+use crate::util::console::style_path;
 
 pub mod frame;
 mod id3;
@@ -91,11 +94,12 @@ impl dyn Tag {
     }
 }
 
-pub fn read_from_path(path: impl AsRef<Path>, format: &str) -> Option<Box<dyn Tag>> {
+pub fn read_from_path(path: impl AsRef<Path>, format: &str) -> Option<Result<Box<dyn Tag>>> {
+    let context = || format!("Invalid tags in file {}", style_path(path.as_ref().display()));
     match format {
-        "mp3" => Some(Box::new(::id3::Tag::read_from_path(&path).unwrap())),
-        "m4a" => Some(Box::new(::mp4ameta::Tag::read_from_path(&path).unwrap())),
-        "flac" => Some(Box::new(::metaflac::Tag::read_from_path(&path).unwrap())),
+        "mp3" => Some(::id3::Tag::read_from_path(&path).map(|v| Box::new(v) as Box<dyn Tag>).with_context(context)),
+        "m4a" => Some(::mp4ameta::Tag::read_from_path(&path).map(|v| Box::new(v) as Box<dyn Tag>).with_context(context)),
+        "flac" => Some(::metaflac::Tag::read_from_path(&path).map(|v| Box::new(v) as Box<dyn Tag>).with_context(context)),
         _ => None
     }
 }

@@ -3,6 +3,7 @@ extern crate core;
 use std::fs;
 use std::path::PathBuf;
 
+use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 
 use crate::command::add_missing_covers::add_missing_covers;
@@ -57,7 +58,7 @@ pub struct AddMissingCoversArgs {
     force_update: bool,
 }
 
-fn main() {
+fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let discogs_token = match cli.discogs_token {
@@ -76,9 +77,11 @@ fn main() {
     let mut console = Console::new();
 
     match cli.command {
-        Command::Import(args) => import(args, &discogs_client, &mut console),
+        Command::Import(args) => import(args, &discogs_client, &mut console)?,
         Command::AddMissingCovers(args) => add_missing_covers(args, &discogs_client, &mut console)
-    };
+    }
+
+    Ok(())
 }
 
 fn get_discogs_token_file_path() -> Option<PathBuf> {

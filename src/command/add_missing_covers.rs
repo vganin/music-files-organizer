@@ -30,7 +30,7 @@ pub fn add_missing_covers(args: AddMissingCoversArgs, discogs_client: &DiscogsCl
                     return false;
                 }
             }
-            
+
             true
         })
         .for_each(|e| {
@@ -46,6 +46,7 @@ pub fn add_missing_covers(args: AddMissingCoversArgs, discogs_client: &DiscogsCl
                     let format = path.extension().unwrap().to_str().unwrap();
                     tag::read_from_path(&path, format)
                 })
+                .filter_map(Result::ok)
                 .next()
                 .and_then(|tag| {
                     discogs_client.fetch_by_meta(

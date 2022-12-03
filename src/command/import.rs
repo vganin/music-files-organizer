@@ -1,10 +1,10 @@
 use std::{fs, io};
 use std::collections::HashSet;
-use std::ffi::OsStr;
 use std::fs::File;
 use std::io::Seek;
 use std::path::{Path, PathBuf};
 
+use anyhow::{Context, Result};
 use dialoguer::Confirm;
 use progress_streams::{ProgressReader, ProgressWriter};
 use reqwest::Url;
@@ -13,6 +13,7 @@ use tempfile::NamedTempFile;
 use walkdir::WalkDir;
 
 use crate::{Console, console_print, DiscogsClient, ImportArgs, pb_finish_with_message, pb_set_message, Tag, tag};
+use crate::util::console::style_path;
 use crate::util::discogs::{cover_uri_from_discogs_info, DiscogsRelease, tag_from_discogs_info};
 use crate::util::r#const::COVER_FILE_NAME_WITHOUT_EXTENSION;
 use crate::util::transcode;
@@ -46,12 +47,12 @@ struct ChangeList {
     cleanups: Vec<Cleanup>,
 }
 
-pub fn import(args: ImportArgs, discogs_client: &DiscogsClient, console: &mut Console) {
-    if !fs::metadata(&args.to).unwrap().is_dir() {
+pub fn import(args: ImportArgs, discogs_client: &DiscogsClient, console: &mut Console) -> Result<()> {
+    if !fs::metadata(&args.to)?.is_dir() {
         panic!("Output path is not directory")
     }
 
-    let music_files = get_music_files(&args.from, console);
+    let music_files = get_music_files(&args.from, console)?;
     let discogs_releases = discogs_client.fetch_by_music_files(music_files, console);
     let changes = calculate_changes(
         discogs_releases,
@@ -62,7 +63,7 @@ pub fn import(args: ImportArgs, discogs_client: &DiscogsClient, console: &mut Co
 
     if changes.music_files.is_empty() && changes.covers.is_empty() {
         console_print!(console, "{}", console::style("Nothing to do, all good").green());
-        return;
+        return Ok(());
     }
 
     if Confirm::new()
@@ -70,8 +71,7 @@ pub fn import(args: ImportArgs, discogs_client: &DiscogsClient, console: &mut Co
         .default(false)
         .show_default(true)
         .wait_for_newline(true)
-        .interact()
-        .unwrap()
+        .interact()?
     {
         print_changes_details(&changes, console);
     }
@@ -81,35 +81,49 @@ pub fn import(args: ImportArgs, discogs_client: &DiscogsClient, console: &mut Co
         .default(true)
         .show_default(true)
         .wait_for_newline(true)
-        .interact()
-        .unwrap()
+        .interact()?
     {
-        write_music_files(&changes.music_files, console);
+        write_music_files(&changes.music_files, console)?;
         download_covers(&discogs_client, &changes.covers, console);
         cleanup(&changes.cleanups);
     }
+
+    Ok(())
 }
 
-fn get_music_files(path: impl AsRef<Path>, console: &mut Console) -> Vec<MusicFile> {
+fn get_music_files(path: impl AsRef<Path>, console: &mut Console) -> Result<Vec<MusicFile>> {
     let pb = console.new_default_spinner();
-    let result = WalkDir::new(path).into_iter()
+
+    let files: Vec<_> = WalkDir::new(path).into_iter()
         .filter_map(Result::ok)
         .filter(|e| !e.file_type().is_dir())
-        .filter_map(|e| {
-            let path = e.path();
-            pb_set_message!(pb, "Analyzing {}",
-                console::style(path.file_name().unwrap().to_str().unwrap()).bold());
-            let format = path.extension().unwrap_or(OsStr::new("")).to_str().unwrap();
-            tag::read_from_path(&path, format).map(|tag| {
+        .collect();
+
+    let mut music_files = vec![];
+
+    for file in files {
+        let path = file.path();
+        let invalid_path_context = || format!("Invalid path {}", style_path(path.display()));
+        let file_name = path.file_name().with_context(invalid_path_context)?
+            .to_str().with_context(invalid_path_context)?;
+        let extension = path.extension().with_context(invalid_path_context)?
+            .to_str().with_context(invalid_path_context)?;
+
+        pb_set_message!(pb, "Analyzing {}", style_path(file_name));
+
+        if let Some(tag) = tag::read_from_path(&path, extension) {
+            let tag = tag?;
+            music_files.push(
                 MusicFile {
                     file_path: PathBuf::from(path),
                     tag,
-                }
-            })
-        })
-        .collect();
+                })
+        }
+    }
+
     pb.finish_and_clear();
-    result
+
+    Ok(music_files)
 }
 
 fn calculate_changes(
@@ -259,8 +273,8 @@ fn print_changes_details(changes: &ChangeList, console: &Console) {
     }
 }
 
-fn write_music_files(changes: &Vec<MusicFileChange>, console: &mut Console) {
-    if changes.is_empty() { return; };
+fn write_music_files(changes: &Vec<MusicFileChange>, console: &mut Console) -> Result<()> {
+    if changes.is_empty() { return Ok(()); };
 
     let total_bytes_to_transfer: u64 = changes.iter()
         .map(|v| v.source_file_len)
@@ -287,7 +301,8 @@ fn write_music_files(changes: &Vec<MusicFileChange>, console: &mut Console) {
                 named_temp_file.path(),
                 |bytes| pb.inc(bytes as u64 / 2),
             );
-            let mut tag = tag::read_from_path(named_temp_file.path(), "m4a").unwrap();
+            let mut tag = tag::read_from_path(named_temp_file.path(), "m4a")
+                .with_context(|| format!("Failed to read from temp file {}", style_path(named_temp_file.path().display())))??;
             tag.set_from(target_tag);
             tag.write_to(named_temp_file.as_file_mut());
             named_temp_file.into_file()
@@ -315,6 +330,8 @@ fn write_music_files(changes: &Vec<MusicFileChange>, console: &mut Console) {
     }
 
     pb_finish_with_message!(pb, "{}", console::style(format!("Written {} file(s)", &changes.len())).green());
+
+    Ok(())
 }
 
 fn download_covers(

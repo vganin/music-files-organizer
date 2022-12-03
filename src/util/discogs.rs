@@ -286,9 +286,9 @@ pub fn tag_from_discogs_info(original_tag: &Box<dyn Tag>, info: &DiscogsReleaseI
     let mut new_tag = clone_box(&**original_tag);
 
     new_tag.clear();
-    new_tag.set_title(track["title"].as_str().unwrap().trim().to_owned());
-    new_tag.set_album(release["title"].as_str().unwrap().trim().to_owned());
-    new_tag.set_album_artist(
+    new_tag.set_title(Some(track["title"].as_str().unwrap().trim().to_owned()));
+    new_tag.set_album(Some(release["title"].as_str().unwrap().trim().to_owned()));
+    new_tag.set_album_artist(Some(
         if track_artists.is_some() {
             "Various Artists".to_owned()
         } else {
@@ -300,8 +300,8 @@ pub fn tag_from_discogs_info(original_tag: &Box<dyn Tag>, info: &DiscogsReleaseI
                 .trim()
                 .to_owned()
         }
-    );
-    new_tag.set_artist(
+    ));
+    new_tag.set_artist(Some(
         track_artists
             .or(Some(album_artists))
             .unwrap()
@@ -311,17 +311,17 @@ pub fn tag_from_discogs_info(original_tag: &Box<dyn Tag>, info: &DiscogsReleaseI
             .join(" ")
             .trim()
             .to_owned()
-    );
-    new_tag.set_year(release["year"].as_i64().unwrap() as i32);
-    new_tag.set_track(track_number);
-    new_tag.set_total_tracks(track_list.len() as u32);
-    new_tag.set_genre(
+    ));
+    new_tag.set_year(Some(release["year"].as_i64().unwrap() as i32));
+    new_tag.set_track(Some(track_number));
+    new_tag.set_total_tracks(Some(track_list.len() as u32));
+    new_tag.set_genre(Some(
         release["styles"].as_array().unwrap_or(&vec![]).iter()
             .map(|v| v.as_str().unwrap().trim())
             .collect::<Vec<&str>>()
             .join("; ")
-    );
-    new_tag.set_custom_text(DISCOGS_RELEASE_TAG.to_owned(), release["uri"].as_str().unwrap().to_owned());
+    ));
+    new_tag.set_custom_text(DISCOGS_RELEASE_TAG.to_owned(), Some(release["uri"].as_str().unwrap().to_owned()));
     new_tag
 }
 

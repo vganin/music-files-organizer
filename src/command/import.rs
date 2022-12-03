@@ -4,7 +4,7 @@ use std::fs::File;
 use std::io::Seek;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use dialoguer::Confirm;
 use progress_streams::{ProgressReader, ProgressWriter};
 use reqwest::Url;
@@ -13,8 +13,10 @@ use tempfile::NamedTempFile;
 use walkdir::WalkDir;
 
 use crate::{Console, console_print, DiscogsClient, ImportArgs, pb_finish_with_message, pb_set_message, Tag, tag};
+use crate::tag::frame::FrameId;
 use crate::util::console::style_path;
 use crate::util::discogs::{cover_uri_from_discogs_info, DiscogsRelease, tag_from_discogs_info};
+use crate::util::path::PathExtensions;
 use crate::util::r#const::COVER_FILE_NAME_WITHOUT_EXTENSION;
 use crate::util::transcode;
 
@@ -49,7 +51,7 @@ struct ChangeList {
 
 pub fn import(args: ImportArgs, discogs_client: &DiscogsClient, console: &mut Console) -> Result<()> {
     if !fs::metadata(&args.to)?.is_dir() {
-        panic!("Output path is not directory")
+        bail!("Output path is not a directory")
     }
 
     let music_files = get_music_files(&args.from, console)?;
@@ -59,7 +61,7 @@ pub fn import(args: ImportArgs, discogs_client: &DiscogsClient, console: &mut Co
         &args.to,
         !args.dont_clean_target_folders,
         args.clean_source_folders,
-    );
+    )?;
 
     if changes.music_files.is_empty() && changes.covers.is_empty() {
         console_print!(console, "{}", console::style("Nothing to do, all good").green());
@@ -84,8 +86,8 @@ pub fn import(args: ImportArgs, discogs_client: &DiscogsClient, console: &mut Co
         .interact()?
     {
         write_music_files(&changes.music_files, console)?;
-        download_covers(&discogs_client, &changes.covers, console);
-        cleanup(&changes.cleanups);
+        download_covers(discogs_client, &changes.covers, console);
+        cleanup(&changes.cleanups)?;
     }
 
     Ok(())
@@ -103,15 +105,12 @@ fn get_music_files(path: impl AsRef<Path>, console: &mut Console) -> Result<Vec<
 
     for file in files {
         let path = file.path();
-        let invalid_path_context = || format!("Invalid path {}", style_path(path.display()));
-        let file_name = path.file_name().with_context(invalid_path_context)?
-            .to_str().with_context(invalid_path_context)?;
-        let extension = path.extension().with_context(invalid_path_context)?
-            .to_str().with_context(invalid_path_context)?;
+        let file_name = path.file_name_or_empty();
+        let extension = path.extension_or_empty();
 
         pb_set_message!(pb, "Analyzing {}", style_path(file_name));
 
-        if let Some(tag) = tag::read_from_path(&path, extension) {
+        if let Some(tag) = tag::read_from_path(path, extension) {
             let tag = tag?;
             music_files.push(
                 MusicFile {
@@ -131,7 +130,7 @@ fn calculate_changes(
     import_path: &Path,
     clean_targets: bool,
     clean_sources: bool,
-) -> ChangeList {
+) -> Result<ChangeList> {
     let mut music_file_changes = Vec::new();
     let mut cover_changes = HashSet::new();
 
@@ -140,12 +139,12 @@ fn calculate_changes(
             let source_tag = &music_file.tag;
             let target_tag = tag_from_discogs_info(source_tag, &discogs_info);
             let source_path = &music_file.file_path;
-            let source_extension = source_path.extension().unwrap().to_str().unwrap();
+            let source_extension = source_path.extension_or_empty();
             let transcode_to_mp4 = source_extension == "flac";
-            let target_folder_path = import_path.join(music_folder_path(&*target_tag));
+            let target_folder_path = import_path.join(music_folder_path(&*target_tag)?);
             let target_extension = if transcode_to_mp4 { "m4a" } else { source_extension };
-            let target_path = target_folder_path.join(music_file_name(&*target_tag, target_extension));
-            let bytes_to_transfer = fs::metadata(&source_path).unwrap().len();
+            let target_path = target_folder_path.join(music_file_name(&*target_tag, target_extension)?);
+            let bytes_to_transfer = fs::metadata(source_path)?.len();
 
             music_file_changes.push(MusicFileChange {
                 source: music_file,
@@ -158,8 +157,8 @@ fn calculate_changes(
             });
 
             if let Some(uri) = cover_uri_from_discogs_info(&discogs_info) {
-                let uri_as_file_path = PathBuf::from(Url::parse(&uri).unwrap().path());
-                let extension = uri_as_file_path.extension().unwrap();
+                let uri_as_file_path = PathBuf::from(Url::parse(uri)?.path());
+                let extension = uri_as_file_path.extension_or_empty();
                 let file_name = PathBuf::from(COVER_FILE_NAME_WITHOUT_EXTENSION).with_extension(extension);
                 cover_changes.insert(CoverChange {
                     path: target_folder_path.join(file_name),
@@ -172,10 +171,10 @@ fn calculate_changes(
     music_file_changes.sort_by(|lhs, rhs| {
         let lhs = &lhs.target.tag;
         let rhs = &rhs.target.tag;
-        let lhs_album = lhs.album().unwrap();
-        let rhs_album = rhs.album().unwrap();
-        let lhs_year = lhs.year().unwrap();
-        let rhs_year = rhs.year().unwrap();
+        let lhs_album = lhs.album().unwrap_or("");
+        let rhs_album = rhs.album().unwrap_or("");
+        let lhs_year = lhs.year().unwrap_or(i32::MIN);
+        let rhs_year = rhs.year().unwrap_or(i32::MIN);
         if lhs_album == rhs_album && lhs_year == rhs_year {
             lhs.track().cmp(&rhs.track())
         } else if lhs_year == rhs_year {
@@ -192,13 +191,13 @@ fn calculate_changes(
         &cover_changes,
         clean_targets,
         clean_sources,
-    );
+    )?;
 
-    ChangeList {
+    Ok(ChangeList {
         music_files: music_file_changes,
         covers: cover_changes,
         cleanups,
-    }
+    })
 }
 
 fn print_changes_details(changes: &ChangeList, console: &Console) {
@@ -216,18 +215,18 @@ fn print_changes_details(changes: &ChangeList, console: &Console) {
                 "{:02}. {} {}",
                 step_number,
                 console::style(if change.transcode_to_mp4 { "Transcode" } else { "Update" }).yellow(),
-                console::style(source_file_path.file_name().unwrap().to_str().unwrap()).bold(),
+                console::style(source_file_path.file_name_or_empty()).bold(),
             );
         } else {
             let common_file_prefix = common_path::common_path(source_file_path, target_file_path)
-                .unwrap_or(PathBuf::new());
+                .unwrap_or_default();
             console_print!(
                 console,
                 "{:02}. {} {} → {}",
                 step_number,
                 console::style(if change.transcode_to_mp4 { "Transcode" } else { "Copy" }).green(),
-                console::style(source_file_path.strip_prefix(&common_file_prefix).unwrap().display()).bold(),
-                console::style(target_file_path.strip_prefix(&common_file_prefix).unwrap().display()).bold(),
+                console::style(source_file_path.strip_prefix_or_same(&common_file_prefix).display()).bold(),
+                console::style(target_file_path.strip_prefix_or_same(&common_file_prefix).display()).bold(),
             );
         }
 
@@ -240,9 +239,9 @@ fn print_changes_details(changes: &ChangeList, console: &Console) {
                 console_print!(
                     console,
                     "    {}: {} → {}",
-                    frame_id.description(),
-                    console::style(source_frame_value.unwrap_or(String::from("None"))).red(),
-                    console::style(target_frame_value.unwrap_or(String::from("None"))).green(),
+                    frame_id,
+                    console::style(source_frame_value.unwrap_or_else(|| String::from("None"))).red(),
+                    console::style(target_frame_value.unwrap_or_else(|| String::from("None"))).green(),
                 );
             }
         }
@@ -290,43 +289,44 @@ fn write_music_files(changes: &Vec<MusicFileChange>, console: &mut Console) -> R
         let target_tag = &target.tag;
 
         pb_set_message!(pb, "Writing {}",
-            console::style(source_path.file_name().unwrap().to_str().unwrap()).bold());
+            console::style(source_path.file_name_or_empty()).bold());
 
-        fs::create_dir_all(target_path.parent().unwrap()).unwrap();
+        fs::create_dir_all(target_path.parent_or_empty())?;
 
         let mut temp_file = if change.transcode_to_mp4 {
-            let mut named_temp_file = NamedTempFile::new().unwrap();
+            let mut named_temp_file = NamedTempFile::new()?;
+            let named_temp_file_path = named_temp_file.path();
             transcode::to_mp4(
-                &source_path,
-                named_temp_file.path(),
+                source_path,
+                named_temp_file_path,
                 |bytes| pb.inc(bytes as u64 / 2),
             );
-            let mut tag = tag::read_from_path(named_temp_file.path(), "m4a")
-                .with_context(|| format!("Failed to read from temp file {}", style_path(named_temp_file.path().display())))??;
-            tag.set_from(target_tag);
+            let mut tag = tag::read_from_path(named_temp_file_path, "m4a")
+                .with_context(|| format!("Failed to read from temp file {}", style_path(named_temp_file_path.display())))??;
+            tag.set_from(target_tag.as_ref())?;
             tag.write_to(named_temp_file.as_file_mut());
             named_temp_file.into_file()
         } else {
             let mut source_file = ProgressReader::new(
-                File::open(&source_path).unwrap(),
+                File::open(source_path)?,
                 |bytes| pb.inc(bytes as u64 / 2),
             );
-            let mut temp_file = tempfile::tempfile().unwrap();
-            io::copy(&mut source_file, &mut temp_file).unwrap();
+            let mut temp_file = tempfile::tempfile()?;
+            io::copy(&mut source_file, &mut temp_file)?;
             target_tag.write_to(&mut temp_file);
             temp_file
         };
 
-        temp_file.seek(io::SeekFrom::Start(0)).unwrap();
+        temp_file.seek(io::SeekFrom::Start(0))?;
 
         let source_file_len = change.source_file_len;
-        let temp_file_len = temp_file.metadata().unwrap().len();
+        let temp_file_len = temp_file.metadata()?.len();
         let mut target_file = ProgressWriter::new(
-            File::create(&target_path).unwrap(),
+            File::create(target_path)?,
             |bytes| pb.inc(bytes as u64 * source_file_len / temp_file_len / 2),
         );
 
-        io::copy(&mut temp_file, &mut target_file).unwrap();
+        io::copy(&mut temp_file, &mut target_file)?;
     }
 
     pb_finish_with_message!(pb, "{}", console::style(format!("Written {} file(s)", &changes.len())).green());
@@ -352,37 +352,36 @@ fn download_covers(
     pb_finish_with_message!(pb, "{}", console::style(format!("Downloaded {} cover(s)", count)).green());
 }
 
-fn cleanup(cleanups: &[Cleanup]) {
+fn cleanup(cleanups: &[Cleanup]) -> Result<()> {
     let mut parent_dirs = HashSet::new();
 
     for cleanup in cleanups {
         let path = &cleanup.path;
-        parent_dirs.insert(path.parent().unwrap().to_owned());
-        let metadata = fs::metadata(path).unwrap();
+        parent_dirs.insert(path.parent_or_empty());
+        let metadata = fs::metadata(path)?;
         if metadata.is_dir() {
-            fs::remove_dir_all(path).unwrap();
+            fs::remove_dir_all(path)?;
         } else {
-            fs::remove_file(path).unwrap();
+            fs::remove_file(path)?;
         }
     }
 
     for parent_dir in parent_dirs {
-        if Path::exists(&parent_dir) && parent_dir.read_dir().unwrap().next().is_none() {
-            if Confirm::new()
-                .with_prompt(format!(
-                    "Directory {} is now empty. Do you wish to remove it?",
-                    console::style(parent_dir.display()).bold()
-                ))
-                .default(true)
-                .show_default(true)
-                .wait_for_newline(true)
-                .interact()
-                .unwrap()
-            {
-                fs::remove_dir_all(&parent_dir).unwrap();
-            }
+        if Path::exists(parent_dir) && parent_dir.read_dir()?.next().is_none() && Confirm::new()
+            .with_prompt(format!(
+                "Directory {} is now empty. Do you wish to remove it?",
+                console::style(parent_dir.display()).bold()
+            ))
+            .default(true)
+            .show_default(true)
+            .wait_for_newline(true)
+            .interact()?
+        {
+            fs::remove_dir_all(parent_dir)?;
         }
     }
+
+    Ok(())
 }
 
 fn find_cleanups(
@@ -390,7 +389,7 @@ fn find_cleanups(
     covers: &Vec<CoverChange>,
     clean_targets: bool,
     clean_sources: bool,
-) -> Vec<Cleanup> {
+) -> Result<Vec<Cleanup>> {
     let mut result = HashSet::new();
 
     let mut source_folder_paths = HashSet::new();
@@ -398,70 +397,84 @@ fn find_cleanups(
     let mut target_paths = HashSet::new();
 
     for change in music_files {
-        source_folder_paths.insert(PathBuf::from(change.source.file_path.parent().unwrap()));
-        target_folder_paths.insert(PathBuf::from(change.target.file_path.parent().unwrap()));
-        target_paths.insert(change.target.file_path.to_owned());
+        source_folder_paths.insert(change.source.file_path.parent_or_empty());
+        target_folder_paths.insert(change.target.file_path.parent_or_empty());
+        target_paths.insert(&change.target.file_path);
     }
 
     for change in covers {
-        target_folder_paths.insert(PathBuf::from(change.path.parent().unwrap()));
-        target_paths.insert(change.path.to_owned());
+        target_folder_paths.insert(change.path.parent_or_empty());
+        target_paths.insert(&change.path);
     }
 
     if clean_targets {
         for target_folder_path in target_folder_paths {
-            target_folder_path.read_dir().into_iter().flat_map(|v| v.into_iter()).for_each(|entry| {
-                let entry = entry.unwrap();
-                let path = entry.path();
-                if !target_paths.contains(&path) {
-                    result.insert(Cleanup { path });
-                }
-            });
+            target_folder_path.read_dir()
+                .into_iter()
+                .flatten()
+                .filter_map(Result::ok)
+                .for_each(|entry| {
+                    let path = entry.path();
+                    if !target_paths.contains(&path) {
+                        result.insert(Cleanup { path });
+                    }
+                });
         }
     }
 
     if clean_sources {
         for source_folder_path in source_folder_paths {
-            source_folder_path.read_dir().into_iter().flat_map(|v| v.into_iter()).for_each(|entry| {
-                let entry = entry.unwrap();
-                let path = entry.path();
-                if !target_paths.contains(&path) {
-                    result.insert(Cleanup { path });
-                }
-            });
+            source_folder_path.read_dir()
+                .into_iter()
+                .flatten()
+                .filter_map(Result::ok)
+                .for_each(|entry| {
+                    let path = entry.path();
+                    if !target_paths.contains(&path) {
+                        result.insert(Cleanup { path });
+                    }
+                });
         }
     }
 
-    result.into_iter().collect()
+    Ok(result.into_iter().collect())
 }
 
-fn music_folder_path(tag: &dyn Tag) -> PathBuf {
+fn music_folder_path(tag: &dyn Tag) -> Result<PathBuf> {
+    let context = |frame_id: FrameId| format!("No {} to form music folder name", frame_id);
+    let album_artist = tag.album_artist().with_context(|| context(FrameId::AlbumArtist))?;
+    let year = tag.year().with_context(|| context(FrameId::Year))?;
+    let album = tag.album().with_context(|| context(FrameId::Album))?;
+
     let mut path = PathBuf::new();
-    path.push(sanitize_path(tag.album_artist().unwrap()));
-    path.push(sanitize_path(format!("({}) {}", tag.year().unwrap(), tag.album().unwrap())));
-    path
+    path.push(sanitize_path(album_artist));
+    path.push(sanitize_path(format!("({}) {}", year, album)));
+
+    Ok(path)
 }
 
-fn music_file_name(tag: &dyn Tag, ext: &str) -> String {
-    sanitize_path(match tag.disc() {
+fn music_file_name(tag: &dyn Tag, extension: &str) -> Result<String> {
+    let context = |frame_id: FrameId| format!("No {} to form music file name", frame_id);
+    let track = tag.track().with_context(|| context(FrameId::Track))?;
+    let title = tag.title().with_context(|| context(FrameId::Title))?;
+
+    Ok(sanitize_path(match tag.disc() {
         Some(disc) => format!(
             "{disc:02}.{track:02}. {title}.{ext}",
             disc = disc,
-            track = tag.track().unwrap(),
-            title = tag.title().unwrap(),
-            ext = ext,
+            track = track,
+            title = title,
+            ext = extension,
         ),
         None => format!(
             "{track:02}. {title}.{ext}",
-            track = tag.track().unwrap(),
-            title = tag.title().unwrap(),
-            ext = ext,
+            track = track,
+            title = title,
+            ext = extension,
         ),
-    })
+    }))
 }
 
 fn sanitize_path<S: AsRef<str>>(name: S) -> String {
-    let mut options = Options::default();
-    options.replacement = "-";
-    sanitize_with_options(name, options)
+    sanitize_with_options(name, Options { replacement: "-", ..Default::default() })
 }

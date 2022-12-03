@@ -29,72 +29,108 @@ impl Tag for mp4ameta::Tag {
         mp4ameta::Tag::title(self)
     }
 
-    fn set_title(&mut self, title: String) {
-        mp4ameta::Tag::set_title(self, title)
+    fn set_title(&mut self, title: Option<String>) {
+        if let Some(title) = title {
+            mp4ameta::Tag::set_title(self, title)
+        } else {
+            mp4ameta::Tag::remove_title(self)
+        }
     }
 
     fn album(&self) -> Option<&str> {
         mp4ameta::Tag::album(self)
     }
 
-    fn set_album(&mut self, album: String) {
-        mp4ameta::Tag::set_album(self, album)
+    fn set_album(&mut self, album: Option<String>) {
+        if let Some(album) = album {
+            mp4ameta::Tag::set_album(self, album)
+        } else {
+            mp4ameta::Tag::remove_album(self)
+        }
     }
 
     fn album_artist(&self) -> Option<&str> {
         mp4ameta::Tag::album_artist(self)
     }
 
-    fn set_album_artist(&mut self, album_artist: String) {
-        mp4ameta::Tag::set_album_artist(self, album_artist)
+    fn set_album_artist(&mut self, album_artist: Option<String>) {
+        if let Some(album_artist) = album_artist {
+            mp4ameta::Tag::set_album_artist(self, album_artist)
+        } else {
+            mp4ameta::Tag::remove_data_of(self, &mp4ameta::ident::ALBUM_ARTIST)
+        }
     }
 
     fn artist(&self) -> Option<&str> {
         mp4ameta::Tag::artist(self)
     }
 
-    fn set_artist(&mut self, artist: String) {
-        mp4ameta::Tag::set_artist(self, artist)
+    fn set_artist(&mut self, artist: Option<String>) {
+        if let Some(artist) = artist {
+            mp4ameta::Tag::set_artist(self, artist)
+        } else {
+            mp4ameta::Tag::remove_data_of(self, &mp4ameta::ident::ARTIST)
+        }
     }
 
     fn year(&self) -> Option<i32> {
         mp4ameta::Tag::year(self).map(|v| v.parse::<i32>().unwrap())
     }
 
-    fn set_year(&mut self, year: i32) {
-        mp4ameta::Tag::set_year(self, year.to_string())
+    fn set_year(&mut self, year: Option<i32>) {
+        if let Some(year) = year {
+            mp4ameta::Tag::set_year(self, year.to_string())
+        } else {
+            mp4ameta::Tag::remove_year(self)
+        }
     }
 
     fn track(&self) -> Option<u32> {
         mp4ameta::Tag::track_number(self).map(|v| v as u32)
     }
 
-    fn set_track(&mut self, track: u32) {
-        mp4ameta::Tag::set_track_number(self, track as u16)
+    fn set_track(&mut self, track: Option<u32>) {
+        if let Some(track) = track {
+            mp4ameta::Tag::set_track_number(self, track as u16)
+        } else {
+            mp4ameta::Tag::remove_track_number(self)
+        }
     }
 
     fn total_tracks(&self) -> Option<u32> {
         mp4ameta::Tag::total_tracks(self).map(|v| v as u32)
     }
 
-    fn set_total_tracks(&mut self, total_tracks: u32) {
-        mp4ameta::Tag::set_total_tracks(self, total_tracks as u16)
+    fn set_total_tracks(&mut self, total_tracks: Option<u32>) {
+        if let Some(total_tracks) = total_tracks {
+            mp4ameta::Tag::set_total_tracks(self, total_tracks as u16)
+        } else {
+            mp4ameta::Tag::remove_total_tracks(self)
+        }
     }
 
     fn disc(&self) -> Option<u32> {
         mp4ameta::Tag::disc_number(self).map(|v| v as u32)
     }
 
-    fn set_disc(&mut self, disc: u32) {
-        mp4ameta::Tag::set_disc_number(self, disc as u16)
+    fn set_disc(&mut self, disc: Option<u32>) {
+        if let Some(disc) = disc {
+            mp4ameta::Tag::set_disc_number(self, disc as u16)
+        } else {
+            mp4ameta::Tag::remove_disc_number(self)
+        }
     }
 
     fn genre(&self) -> Option<&str> {
         mp4ameta::Tag::genre(self)
     }
 
-    fn set_genre(&mut self, genre: String) {
-        mp4ameta::Tag::set_genre(self, genre)
+    fn set_genre(&mut self, genre: Option<String>) {
+        if let Some(genre) = genre {
+            mp4ameta::Tag::set_genre(self, genre)
+        } else {
+            mp4ameta::Tag::remove_data_of(self, &mp4ameta::ident::CUSTOM_GENRE)
+        }
     }
 
     fn custom_text(&self, key: &str) -> Option<&str> {
@@ -103,12 +139,13 @@ impl Tag for mp4ameta::Tag {
             .map(|v| v.1)
     }
 
-    fn set_custom_text(&mut self, key: String, value: String) {
-        mp4ameta::Tag::set_data(
-            self,
-            mp4ameta::FreeformIdent::new("com.apple.iTunes", key.as_str()),
-            mp4ameta::Data::Utf8(value),
-        )
+    fn set_custom_text(&mut self, key: String, value: Option<String>) {
+        let ident = mp4ameta::FreeformIdent::new("com.apple.iTunes", key.as_str());
+        if let Some(value) = value {
+            mp4ameta::Tag::set_data(self, ident, mp4ameta::Data::Utf8(value))
+        } else {
+            mp4ameta::Tag::remove_data_of(self, &ident)
+        }
     }
 
     fn clear(&mut self) {

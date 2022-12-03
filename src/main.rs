@@ -1,3 +1,9 @@
+#![warn(
+clippy::unwrap_used,
+clippy::panic,
+clippy::expect_used,
+)]
+
 extern crate core;
 
 use std::fs;

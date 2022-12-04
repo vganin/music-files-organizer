@@ -760,6 +760,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07dcca13d1740c0a665f77104803360da0bdb3323ecce2e93fa2c959a6d52806"
 
 [[package]]
+name = "music-files-organizer"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "common-path",
+ "console",
+ "dialoguer",
+ "dirs",
+ "dyn-clone",
+ "ffmpeg-next",
+ "id3",
+ "indicatif",
+ "itertools",
+ "metaflac",
+ "mp4ameta",
+ "progress-streams",
+ "regex",
+ "reqwest",
+ "sanitize-filename",
+ "serde_json",
+ "tempfile",
+ "walkdir",
+]
+
+[[package]]
 name = "native-tls"
 version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -858,32 +884,6 @@ dependencies = [
  "libc",
  "pkg-config",
  "vcpkg",
-]
-
-[[package]]
-name = "orgtag"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "common-path",
- "console",
- "dialoguer",
- "dirs",
- "dyn-clone",
- "ffmpeg-next",
- "id3",
- "indicatif",
- "itertools",
- "metaflac",
- "mp4ameta",
- "progress-streams",
- "regex",
- "reqwest",
- "sanitize-filename",
- "serde_json",
- "tempfile",
- "walkdir",
 ]
 
 [[package]]

@@ -362,7 +362,7 @@ fn common_headers(discogs_token: &str) -> HeaderMap {
         format!("{name}/{version} +{site}",
                 name = env!("CARGO_PKG_NAME"),
                 version = env!("CARGO_PKG_VERSION"),
-                site = "https://github.com/vganin/orgtag"
+                site = "https://github.com/vganin/music-files-organizer"
         )
     ).unwrap());
     headers.insert(AUTHORIZATION, HeaderValue::try_from(format!("Discogs token={}", discogs_token)).unwrap());

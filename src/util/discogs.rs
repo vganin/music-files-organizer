@@ -15,6 +15,7 @@ use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
 
 use crate::{Console, console_print, Tag};
 use crate::command::import::MusicFile;
+use crate::util::console_styleable::ConsoleStyleable;
 
 pub struct DiscogsClient {
     client: blocking::Client,
@@ -66,7 +67,7 @@ impl DiscogsClient {
             let discogs_info = if artists.is_empty() || albums.len() != 1 || tracks.is_empty() {
                 self.fetch_by_release_id(
                     &ask_discogs_release_id(
-                        &format!("Can't find release for {}", console::style(path.display()).bold())),
+                        &format!("Can't find release for {}", path.display().path_styled())),
                     console,
                 )
             } else {
@@ -78,8 +79,8 @@ impl DiscogsClient {
                             &ask_discogs_release_id(
                                 &format!(
                                     "Can't find release for {} - {}",
-                                    console::style(artists.join(", ")).bold(),
-                                    console::style(album).bold()
+                                    artists.join(", ").tag_styled(),
+                                    album.tag_styled()
                                 )
                             ),
                             console,
@@ -87,7 +88,7 @@ impl DiscogsClient {
                     })
             }.unwrap();
 
-            console_print!(console, "Will use {}", console::style(discogs_info.json["uri"].as_str().unwrap()).bold());
+            console_print!(console, "Will use {}", discogs_info.json["uri"].as_str().unwrap().path_styled());
 
             result.push(DiscogsRelease {
                 music_files,
@@ -109,9 +110,9 @@ impl DiscogsClient {
         console_print!(
             console,
             "Searching Discogs for {} :: {} :: {}",
-            console::style(&artists.join(", ")).bold(),
-            console::style(album).bold(),
-            console::style(track).bold(),
+            &artists.join(", ").tag_styled(),
+            album.tag_styled(),
+            track.tag_styled(),
         );
 
         let artist_param = artists.join(" ");
@@ -236,7 +237,7 @@ impl DiscogsClient {
     }
 
     fn get_ok<T: IntoUrl + Clone + Display>(&self, url: T, console: &Console) -> Option<Response> {
-        console_print!(console, "Fetching {}", console::style(&url).bold());
+        console_print!(console, "Fetching {}", (&url).path_styled());
         loop {
             let response = self.client.get(url.clone()).send().unwrap();
             let status = response.status();
@@ -245,7 +246,7 @@ impl DiscogsClient {
             } else if status == StatusCode::NOT_FOUND {
                 break None;
             } else if status == StatusCode::TOO_MANY_REQUESTS {
-                console_print!(console, "{}", console::style("Reached requests limit! Slowing down...").bold().yellow());
+                console_print!(console, "{}", "Reached requests limit! Slowing down...".styled().bold().yellow());
                 let header_as_number = |str| response.headers().get(str).unwrap().to_str().unwrap().parse::<f64>().unwrap();
                 let rate_limit = header_as_number("X-Discogs-Ratelimit");
                 let rate_limit_used = header_as_number("X-Discogs-Ratelimit-Used");

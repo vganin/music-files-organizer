@@ -4,6 +4,7 @@ use reqwest::Url;
 use walkdir::WalkDir;
 
 use crate::{AddMissingCoversArgs, Console, DiscogsClient, pb_finish_with_message, pb_set_message, tag};
+use crate::util::console_styleable::ConsoleStyleable;
 use crate::util::discogs::cover_uri_from_discogs_info;
 use crate::util::r#const::{COVER_EXTENSIONS, COVER_FILE_NAME_WITHOUT_EXTENSION};
 
@@ -17,7 +18,7 @@ pub fn add_missing_covers(args: AddMissingCoversArgs, discogs_client: &DiscogsCl
         .filter(|e| e.file_type().is_dir())
         .inspect(|e| {
             let display_path = e.path().strip_prefix(&root_path).unwrap().display();
-            pb_set_message!(pb, "Processing {}", console::style(display_path).bold());
+            pb_set_message!(pb, "Processing {}", display_path.path_styled());
         })
         .filter(|e| {
             if args.force_update {
@@ -66,11 +67,11 @@ pub fn add_missing_covers(args: AddMissingCoversArgs, discogs_client: &DiscogsCl
                 let cover_file_name = PathBuf::from(COVER_FILE_NAME_WITHOUT_EXTENSION).with_extension(cover_extension);
                 let cover_path = path.join(cover_file_name);
                 let display_path = e.path().strip_prefix(&root_path).unwrap().display();
-                pb_set_message!(pb, "Downloading cover to {}", console::style(display_path).bold());
+                pb_set_message!(pb, "Downloading cover to {}", display_path.path_styled());
                 discogs_client.download_cover(&cover_uri, &cover_path, &pb, console);
                 downloaded_covers_count += 1;
             }
         });
 
-    pb_finish_with_message!(pb, "{}", console::style(format!("Downloaded {} cover(s)", downloaded_covers_count)).green());
+    pb_finish_with_message!(pb, "{}", format!("Downloaded {} cover(s)", downloaded_covers_count).styled().green());
 }

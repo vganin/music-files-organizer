@@ -14,7 +14,7 @@ use walkdir::WalkDir;
 
 use crate::{Console, console_print, DiscogsClient, ImportArgs, pb_finish_with_message, pb_set_message, Tag, tag};
 use crate::tag::frame::FrameId;
-use crate::util::console::style_path;
+use crate::util::console_styleable::ConsoleStyleable;
 use crate::util::discogs::{cover_uri_from_discogs_info, DiscogsRelease, tag_from_discogs_info};
 use crate::util::path::PathExtensions;
 use crate::util::r#const::COVER_FILE_NAME_WITHOUT_EXTENSION;
@@ -64,7 +64,7 @@ pub fn import(args: ImportArgs, discogs_client: &DiscogsClient, console: &mut Co
     )?;
 
     if changes.music_files.is_empty() && changes.covers.is_empty() {
-        console_print!(console, "{}", console::style("Nothing to do, all good").green());
+        console_print!(console, "{}", "Nothing to do, all good".styled().green());
         return Ok(());
     }
 
@@ -108,7 +108,7 @@ fn get_music_files(path: impl AsRef<Path>, console: &mut Console) -> Result<Vec<
         let file_name = path.file_name_or_empty();
         let extension = path.extension_or_empty();
 
-        pb_set_message!(pb, "Analyzing {}", style_path(file_name));
+        pb_set_message!(pb, "Analyzing {}", file_name.path_styled());
 
         if let Some(tag) = tag::read_from_path(path, extension) {
             let tag = tag?;
@@ -214,8 +214,8 @@ fn print_changes_details(changes: &ChangeList, console: &Console) {
                 console,
                 "{:02}. {} {}",
                 step_number,
-                console::style(if change.transcode_to_mp4 { "Transcode" } else { "Update" }).yellow(),
-                console::style(source_file_path.file_name_or_empty()).bold(),
+                if change.transcode_to_mp4 { "Transcode" } else { "Update" }.styled().yellow(),
+                source_file_path.file_name_or_empty().path_styled(),
             );
         } else {
             let common_file_prefix = common_path::common_path(source_file_path, target_file_path)
@@ -224,9 +224,9 @@ fn print_changes_details(changes: &ChangeList, console: &Console) {
                 console,
                 "{:02}. {} {} → {}",
                 step_number,
-                console::style(if change.transcode_to_mp4 { "Transcode" } else { "Copy" }).green(),
-                console::style(source_file_path.strip_prefix_or_same(&common_file_prefix).display()).bold(),
-                console::style(target_file_path.strip_prefix_or_same(&common_file_prefix).display()).bold(),
+                if change.transcode_to_mp4 { "Transcode" } else { "Copy" }.styled().green(),
+                source_file_path.strip_prefix_or_same(&common_file_prefix).display().path_styled(),
+                target_file_path.strip_prefix_or_same(&common_file_prefix).display().path_styled(),
             );
         }
 
@@ -240,8 +240,8 @@ fn print_changes_details(changes: &ChangeList, console: &Console) {
                     console,
                     "    {}: {} → {}",
                     frame_id,
-                    console::style(source_frame_value.unwrap_or_else(|| String::from("None"))).red(),
-                    console::style(target_frame_value.unwrap_or_else(|| String::from("None"))).green(),
+                    source_frame_value.unwrap_or_else(|| String::from("None")).styled().red(),
+                    target_frame_value.unwrap_or_else(|| String::from("None")).styled().green(),
                 );
             }
         }
@@ -254,8 +254,8 @@ fn print_changes_details(changes: &ChangeList, console: &Console) {
             console,
             "{:02}. {} cover to {}",
             step_number,
-            console::style("Download").green(),
-            console::style(change.path.display()).bold(),
+            "Download".styled().green(),
+            change.path.display().path_styled(),
         );
         step_number += 1;
     }
@@ -265,8 +265,8 @@ fn print_changes_details(changes: &ChangeList, console: &Console) {
             console,
             "{:02}. {} {}",
             step_number,
-            console::style("Remove").red().bold(),
-            console::style(cleanup.path.display()).bold(),
+            "Remove".styled().red().bold(),
+            cleanup.path.display().path_styled(),
         );
         step_number += 1;
     }
@@ -288,8 +288,7 @@ fn write_music_files(changes: &Vec<MusicFileChange>, console: &mut Console) -> R
         let target_path = &target.file_path;
         let target_tag = &target.tag;
 
-        pb_set_message!(pb, "Writing {}",
-            console::style(source_path.file_name_or_empty()).bold());
+        pb_set_message!(pb, "Writing {}", source_path.file_name_or_empty().path_styled());
 
         fs::create_dir_all(target_path.parent_or_empty())?;
 
@@ -302,7 +301,7 @@ fn write_music_files(changes: &Vec<MusicFileChange>, console: &mut Console) -> R
                 |bytes| pb.inc(bytes as u64 / 2),
             );
             let mut tag = tag::read_from_path(named_temp_file_path, "m4a")
-                .with_context(|| format!("Failed to read from temp file {}", style_path(named_temp_file_path.display())))??;
+                .with_context(|| format!("Failed to read from temp file {}", named_temp_file_path.display().path_styled()))??;
             tag.set_from(target_tag.as_ref())?;
             tag.write_to(named_temp_file.as_file_mut());
             named_temp_file.into_file()
@@ -329,7 +328,7 @@ fn write_music_files(changes: &Vec<MusicFileChange>, console: &mut Console) -> R
         io::copy(&mut temp_file, &mut target_file)?;
     }
 
-    pb_finish_with_message!(pb, "{}", console::style(format!("Written {} file(s)", &changes.len())).green());
+    pb_finish_with_message!(pb, "{}", format!("Written {} file(s)", &changes.len()).styled().green());
 
     Ok(())
 }
@@ -349,7 +348,7 @@ fn download_covers(
         discogs_client.download_cover(&change.uri, &change.path, &pb, console);
     }
 
-    pb_finish_with_message!(pb, "{}", console::style(format!("Downloaded {} cover(s)", count)).green());
+    pb_finish_with_message!(pb, "{}", format!("Downloaded {} cover(s)", count).styled().green());
 }
 
 fn cleanup(cleanups: &[Cleanup]) -> Result<()> {
@@ -368,10 +367,7 @@ fn cleanup(cleanups: &[Cleanup]) -> Result<()> {
 
     for parent_dir in parent_dirs {
         if Path::exists(parent_dir) && parent_dir.read_dir()?.next().is_none() && Confirm::new()
-            .with_prompt(format!(
-                "Directory {} is now empty. Do you wish to remove it?",
-                console::style(parent_dir.display()).bold()
-            ))
+            .with_prompt(format!("Directory {} is now empty. Do you wish to remove it?", parent_dir.display().path_styled()))
             .default(true)
             .show_default(true)
             .wait_for_newline(true)

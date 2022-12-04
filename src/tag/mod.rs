@@ -8,7 +8,7 @@ use dyn_clone::DynClone;
 
 use frame::*;
 
-use crate::util::console::style_path;
+use crate::util::console_styleable::ConsoleStyleable;
 
 pub mod frame;
 mod id3;
@@ -125,7 +125,7 @@ impl dyn Tag + '_ {
 }
 
 pub fn read_from_path(path: impl AsRef<Path>, format: &str) -> Option<Result<Box<dyn Tag>>> {
-    let context = || format!("Invalid tags in file {}", style_path(path.as_ref().display()));
+    let context = || format!("Invalid tags in file {}", path.as_ref().display().path_styled());
     match format {
         "mp3" => Some(::id3::Tag::read_from_path(&path).map(|v| Box::new(v) as Box<dyn Tag>).with_context(context)),
         "m4a" => Some(mp4ameta::Tag::read_from_path(&path).map(|v| Box::new(v) as Box<dyn Tag>).with_context(context)),

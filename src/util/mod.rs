@@ -3,3 +3,4 @@ pub mod discogs;
 pub mod transcode;
 pub mod r#const;
 pub mod path;
+pub mod console_styleable;

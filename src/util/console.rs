@@ -1,4 +1,4 @@
-use console::{StyledObject, Term};
+use console::Term;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Itertools;
 
@@ -21,10 +21,6 @@ macro_rules! pb_finish_with_message {
     ($pb:expr, $($arg:tt)*) => ({
         $pb.finish_with_message(format!($($arg)*));
     })
-}
-
-pub fn style_path<D>(path: D) -> StyledObject<D> {
-    console::style(path).bold()
 }
 
 pub struct Console {

@@ -6,8 +6,11 @@ clippy::expect_used,
 
 extern crate core;
 
+
 use std::fs;
+use std::ops::Deref;
 use std::path::PathBuf;
+use std::process::ExitCode;
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
@@ -17,6 +20,7 @@ use crate::command::import::import;
 use crate::discogs::client::DiscogsClient;
 use crate::tag::Tag;
 use crate::util::console::Console;
+use crate::util::console_styleable::ConsoleStyleable;
 
 mod tag;
 mod command;
@@ -63,7 +67,18 @@ pub struct AddMissingCoversArgs {
     force_update: bool,
 }
 
-fn main() -> Result<()> {
+fn main() -> ExitCode {
+    match main_with_result() {
+        Ok(_) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("{}", error.deref().error_styled());
+            eprintln!("\n{}", error.backtrace().error_styled());
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn main_with_result() -> Result<()> {
     let cli = Cli::parse();
 
     let discogs_token = match cli.discogs_token {

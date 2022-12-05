@@ -1,3 +1,10 @@
+// Allow panic here because almost everything can panic
+#![allow(
+clippy::unwrap_used,
+clippy::panic,
+clippy::expect_used,
+)]
+
 extern crate ffmpeg_next as ffmpeg;
 
 use std::path::Path;
@@ -65,7 +72,7 @@ fn transcoder<'a>(
         .streams()
         .best(media::Type::Audio)
         .expect("could not find best audio stream");
-    let context = codec::context::Context::from_parameters(input.parameters())?;
+    let context = codec::Context::from_parameters(input.parameters())?;
     let mut decoder = context.decoder().audio()?;
     let codec = ffmpeg::encoder::find_by_name(output_codec)
         .expect("failed to find encoder")
@@ -73,12 +80,12 @@ fn transcoder<'a>(
     let global = output_format
         .format()
         .flags()
-        .contains(ffmpeg::format::flag::Flags::GLOBAL_HEADER);
+        .contains(format::flag::Flags::GLOBAL_HEADER);
 
     decoder.set_parameters(input.parameters())?;
 
     let mut output = output_format.add_stream(codec)?;
-    let context = ffmpeg::codec::context::Context::from_parameters(output.parameters())?;
+    let context = codec::context::Context::from_parameters(output.parameters())?;
     let mut encoder = context.encoder().audio()?;
 
     let channel_layout = codec
@@ -87,7 +94,7 @@ fn transcoder<'a>(
         .unwrap_or(ffmpeg::channel_layout::ChannelLayout::STEREO);
 
     if global {
-        encoder.set_flags(ffmpeg::codec::flag::Flags::GLOBAL_HEADER);
+        encoder.set_flags(codec::flag::Flags::GLOBAL_HEADER);
     }
 
     encoder.set_rate(decoder.rate() as i32);
@@ -150,7 +157,7 @@ fn filter(
     if let Some(codec) = encoder.codec() {
         if !codec
             .capabilities()
-            .contains(ffmpeg::codec::capabilities::Capabilities::VARIABLE_FRAME_SIZE)
+            .contains(codec::capabilities::Capabilities::VARIABLE_FRAME_SIZE)
         {
             filter.get("out").unwrap().sink().set_frame_size(encoder.frame_size());
         }

@@ -15,7 +15,7 @@ use std::process::ExitCode;
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 
-use crate::command::add_missing_covers::add_missing_covers;
+use crate::command::add_covers::add_covers;
 use crate::command::import::import;
 use crate::discogs::client::DiscogsClient;
 use crate::tag::Tag;
@@ -40,7 +40,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     Import(ImportArgs),
-    AddMissingCovers(AddMissingCoversArgs),
+    AddCovers(AddCoversArguments),
 }
 
 #[derive(Args)]
@@ -59,12 +59,12 @@ pub struct ImportArgs {
 }
 
 #[derive(Args)]
-pub struct AddMissingCoversArgs {
+pub struct AddCoversArguments {
     #[clap(long, parse(from_os_str))]
     to: PathBuf,
 
     #[clap(long)]
-    force_update: bool,
+    skip_if_present: bool,
 }
 
 fn main() -> ExitCode {
@@ -96,7 +96,7 @@ fn main_with_result() -> Result<()> {
 
     match cli.command {
         Command::Import(args) => import(args, &discogs_client, &mut console)?,
-        Command::AddMissingCovers(args) => add_missing_covers(args, &discogs_client, &mut console)?
+        Command::AddCovers(args) => add_covers(args, &discogs_client, &mut console)?
     }
 
     Ok(())

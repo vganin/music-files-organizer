@@ -5,14 +5,14 @@ use itertools::Itertools;
 use reqwest::Url;
 use walkdir::WalkDir;
 
-use crate::{AddMissingCoversArgs, Console, DiscogsClient, pb_finish_with_message, pb_set_message, tag};
+use crate::{AddCoversArguments, Console, console_print, DiscogsClient, pb_finish_with_message, pb_set_message, tag};
 use crate::discogs::model::DiscogsRelease;
 use crate::util::console_styleable::ConsoleStyleable;
 use crate::util::path_extensions::PathExtensions;
 use crate::util::r#const::{COVER_EXTENSIONS, COVER_FILE_NAME_WITHOUT_EXTENSION};
 
-pub fn add_missing_covers(
-    args: AddMissingCoversArgs,
+pub fn add_covers(
+    args: AddCoversArguments,
     discogs_client: &DiscogsClient,
     console: &mut Console,
 ) -> Result<()> {
@@ -24,18 +24,19 @@ pub fn add_missing_covers(
     let directories = WalkDir::new(&root_path).into_iter()
         .filter_map(Result::ok)
         .filter(|e| e.file_type().is_dir())
-        .inspect(|e| {
-            let display_path = e.path().strip_prefix_or_same(&root_path).display();
-            pb_set_message!(pb, "Processing {}", display_path.path_styled());
-        })
         .filter(|e| {
-            if args.force_update {
+            let display_path = &e.path().strip_prefix_or_same(&root_path).display();
+
+            pb_set_message!(pb, "Processing {}", display_path.path_styled());
+
+            if !args.skip_if_present {
                 return true;
             }
 
             let path = e.path();
             for extension in COVER_EXTENSIONS {
                 if Path::exists(&path.join(COVER_FILE_NAME_WITHOUT_EXTENSION).with_extension(extension)) {
+                    console_print!(console, "Skipped {}", display_path.path_styled());
                     return false;
                 }
             }

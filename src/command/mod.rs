@@ -1,2 +1,2 @@
 pub mod import;
-pub mod add_missing_covers;
+pub mod add_covers;

@@ -2,6 +2,7 @@ use std::{fs, io};
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::Seek;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
@@ -137,13 +138,13 @@ fn calculate_changes<'a>(
     for MusicFilesToDiscogsRelease { music_files, discogs_release } in discogs_releases {
         for music_file in music_files {
             let source_tag = &music_file.tag;
-            let target_tag = discogs_release.to_tag(&source_tag)?;
+            let target_tag = discogs_release.to_tag(source_tag)?;
             let source_path = &music_file.file_path;
             let source_extension = source_path.extension_or_empty();
             let transcode_to_mp4 = source_extension == "flac";
-            let target_folder_path = import_path.join(music_folder_path(&target_tag)?);
+            let target_folder_path = import_path.join(music_folder_path(target_tag.deref())?);
             let target_extension = if transcode_to_mp4 { "m4a" } else { source_extension };
-            let target_path = target_folder_path.join(music_file_name(&target_tag, target_extension)?);
+            let target_path = target_folder_path.join(music_file_name(target_tag.deref(), target_extension)?);
             let bytes_to_transfer = fs::metadata(source_path)?.len();
 
             music_file_changes.push(MusicFileChange {
@@ -304,7 +305,7 @@ fn write_music_files(changes: &Vec<MusicFileChange>, console: &mut Console) -> R
             let mut tag = tag::read_from_path(named_temp_file_path, "m4a")
                 .with_context(|| format!("Failed to read from temp file {}", named_temp_file_path.display().path_styled()))??;
             tag.set_from(target_tag.as_ref())?;
-            tag.write_to(named_temp_file.as_file_mut());
+            tag.write_to(named_temp_file.as_file_mut())?;
             named_temp_file.into_file()
         } else {
             let mut source_file = ProgressReader::new(
@@ -313,7 +314,7 @@ fn write_music_files(changes: &Vec<MusicFileChange>, console: &mut Console) -> R
             );
             let mut temp_file = tempfile::tempfile()?;
             io::copy(&mut source_file, &mut temp_file)?;
-            target_tag.write_to(&mut temp_file);
+            target_tag.write_to(&mut temp_file)?;
             temp_file
         };
 
@@ -439,7 +440,7 @@ fn find_cleanups(
     Ok(result.into_iter().collect())
 }
 
-fn music_folder_path(tag: &Box<dyn Tag>) -> Result<PathBuf> {
+fn music_folder_path(tag: &dyn Tag) -> Result<PathBuf> {
     let context = |frame_id: FrameId| format!("No {} to form music folder name", frame_id);
     let album_artist = tag.album_artist().with_context(|| context(FrameId::AlbumArtist))?;
     let year = tag.year().with_context(|| context(FrameId::Year))?;
@@ -452,7 +453,7 @@ fn music_folder_path(tag: &Box<dyn Tag>) -> Result<PathBuf> {
     Ok(path)
 }
 
-fn music_file_name(tag: &Box<dyn Tag>, extension: &str) -> Result<String> {
+fn music_file_name(tag: &dyn Tag, extension: &str) -> Result<String> {
     let context = |frame_id: FrameId| format!("No {} to form music file name", frame_id);
     let track = tag.track_number().with_context(|| context(FrameId::Track))?;
     let title = tag.title().with_context(|| context(FrameId::Title))?;

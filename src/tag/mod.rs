@@ -50,7 +50,7 @@ pub trait Tag: DynClone {
 
     fn clear(&mut self);
 
-    fn write_to(&self, file: &mut File);
+    fn write_to(&self, file: &mut File) -> Result<()>;
 }
 
 impl dyn Tag + '_ {

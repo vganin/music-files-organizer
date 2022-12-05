@@ -1,4 +1,6 @@
 use ::id3 as id3;
+use anyhow::Result;
+use itertools::Itertools;
 
 use super::*;
 
@@ -6,25 +8,26 @@ impl Tag for id3::Tag {
     fn frame_ids(&self) -> Vec<FrameId> {
         id3::Tag::frames(self)
             .into_iter()
-            .filter_map(|frame| {
+            .flat_map(|frame| {
                 match frame.id() {
-                    "TIT2" => Some(vec![FrameId::Title]),
-                    "TALB" => Some(vec![FrameId::Album]),
-                    "TPE2" => Some(vec![FrameId::AlbumArtist]),
-                    "TPE1" => Some(vec![FrameId::Artist]),
+                    "TIT2" => vec![FrameId::Title],
+                    "TALB" => vec![FrameId::Album],
+                    "TPE2" => vec![FrameId::AlbumArtist],
+                    "TPE1" => vec![FrameId::Artist],
                     "TYER" |
-                    "TDRC" => Some(vec![FrameId::Year]),
-                    "TRCK" => Some(vec![FrameId::Track, FrameId::TotalTracks]),
-                    "TPOS" => Some(vec![FrameId::Disc]),
-                    "TCON" => Some(vec![FrameId::Genre]),
-                    "TXXX" => Some(vec![FrameId::CustomText {
-                        key: frame.content().extended_text().unwrap().description.to_owned()
-                    }]),
-                    _ => None
+                    "TDRC" => vec![FrameId::Year],
+                    "TRCK" => vec![FrameId::Track, FrameId::TotalTracks],
+                    "TPOS" => vec![FrameId::Disc],
+                    "TCON" => vec![FrameId::Genre],
+                    "TXXX" => frame.content().extended_text().into_iter().map(|extended_text| {
+                        FrameId::CustomText {
+                            key: extended_text.description.to_owned()
+                        }
+                    }).collect_vec(),
+                    _ => vec![]
                 }
             })
-            .flatten()
-            .collect()
+            .collect_vec()
     }
 
     fn title(&self) -> Option<&str> {
@@ -165,13 +168,13 @@ impl Tag for id3::Tag {
         id3::TagLike::frames_vec_mut(self).clear();
     }
 
-    fn write_to(&self, file: &mut File) {
-        file.seek(io::SeekFrom::Start(0)).unwrap();
-        id3::v1::Tag::remove(file).unwrap();
-        file.seek(io::SeekFrom::Start(0)).unwrap();
+    fn write_to(&self, file: &mut File) -> Result<()> {
+        file.seek(io::SeekFrom::Start(0))?;
+        id3::v1::Tag::remove(file)?;
+        file.seek(io::SeekFrom::Start(0))?;
         id3::Encoder::new()
             .version(id3::Version::Id3v24)
-            .encode_to_file(self, file)
-            .unwrap()
+            .encode_to_file(self, file)?;
+        Ok(())
     }
 }

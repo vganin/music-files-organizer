@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use anyhow::{Context, Result};
 use dyn_clone::clone_box;
 use itertools::Itertools;
@@ -6,6 +8,7 @@ use crate::discogs::model::DiscogsRelease;
 use crate::tag::Tag;
 
 impl DiscogsRelease {
+    #[allow(clippy::borrowed_box)] // FIXME: Fix reference to Box
     pub fn to_tag(&self, original_tag: &Box<dyn Tag>) -> Result<Box<dyn Tag>> {
         let track_number = original_tag.track_number().context("No track number")?;
         let track_list = self.valid_track_list();
@@ -30,7 +33,7 @@ impl DiscogsRelease {
                     .collect_vec()
             });
 
-        let mut new_tag = clone_box(original_tag.as_ref());
+        let mut new_tag = clone_box(original_tag.deref());
 
         new_tag.clear();
         new_tag.set_title(Some(track_from_original_tag.proper_title().to_owned()));

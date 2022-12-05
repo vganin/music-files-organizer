@@ -6,7 +6,6 @@ clippy::expect_used,
 
 extern crate core;
 
-
 use std::fs;
 use std::ops::Deref;
 use std::path::PathBuf;

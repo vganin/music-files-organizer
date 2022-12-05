@@ -3,8 +3,8 @@ use super::*;
 impl Tag for metaflac::Tag {
     fn frame_ids(&self) -> Vec<FrameId> {
         metaflac::Tag::vorbis_comments(self)
-            .map(|v| v.comments.keys())
-            .unwrap()
+            .iter()
+            .flat_map(|v| v.comments.keys())
             .map(|key| {
                 match key.as_str() {
                     FLAC_TITLE => FrameId::Title,
@@ -24,8 +24,7 @@ impl Tag for metaflac::Tag {
 
     fn title(&self) -> Option<&str> {
         metaflac::Tag::vorbis_comments(self)
-            .map(|v| v.title().map(|v| v.iter().next()).flatten())
-            .flatten()
+            .and_then(|v| v.title().and_then(|v| v.iter().next()))
             .map(|v| v.as_str())
     }
 
@@ -40,8 +39,7 @@ impl Tag for metaflac::Tag {
 
     fn album(&self) -> Option<&str> {
         metaflac::Tag::vorbis_comments(self)
-            .map(|v| v.album().map(|v| v.iter().next()).flatten())
-            .flatten()
+            .and_then(|v| v.album().and_then(|v| v.iter().next()))
             .map(|v| v.as_str())
     }
 
@@ -56,8 +54,7 @@ impl Tag for metaflac::Tag {
 
     fn album_artist(&self) -> Option<&str> {
         metaflac::Tag::vorbis_comments(self)
-            .map(|v| v.album_artist().map(|v| v.iter().next()).flatten())
-            .flatten()
+            .and_then(|v| v.album_artist().and_then(|v| v.iter().next()))
             .map(|v| v.as_str())
     }
 
@@ -72,8 +69,7 @@ impl Tag for metaflac::Tag {
 
     fn artist(&self) -> Option<&str> {
         metaflac::Tag::vorbis_comments(self)
-            .map(|v| v.artist().map(|v| v.iter().next()).flatten())
-            .flatten()
+            .and_then(|v| v.artist().and_then(|v| v.iter().next()))
             .map(|v| v.as_str())
     }
 
@@ -88,7 +84,7 @@ impl Tag for metaflac::Tag {
 
     fn year(&self) -> Option<i32> {
         metaflac::Tag::vorbis_comments(self)
-            .map(|v| {
+            .and_then(|v| {
                 v.get(FLAC_YEAR).and_then(|s| {
                     if !s.is_empty() {
                         s[0].parse::<i32>().ok()
@@ -97,7 +93,6 @@ impl Tag for metaflac::Tag {
                     }
                 })
             })
-            .flatten()
     }
 
     fn set_year(&mut self, year: Option<i32>) {
@@ -111,8 +106,7 @@ impl Tag for metaflac::Tag {
 
     fn track_number(&self) -> Option<u32> {
         metaflac::Tag::vorbis_comments(self)
-            .map(|v| v.track().or_else(|| Some(vorbis_comment_as_pair(v, FLAC_TRACK)?.0)))
-            .flatten()
+            .and_then(|v| v.track().or_else(|| Some(vorbis_comment_as_pair(v, FLAC_TRACK)?.0)))
     }
 
     fn set_track_number(&mut self, track: Option<u32>) {
@@ -126,8 +120,7 @@ impl Tag for metaflac::Tag {
 
     fn total_tracks(&self) -> Option<u32> {
         metaflac::Tag::vorbis_comments(self)
-            .map(|v| v.total_tracks().or_else(|| vorbis_comment_as_pair(v, FLAC_TRACK)?.1))
-            .flatten()
+            .and_then(|v| v.total_tracks().or_else(|| vorbis_comment_as_pair(v, FLAC_TRACK)?.1))
     }
 
     fn set_total_tracks(&mut self, total_tracks: Option<u32>) {
@@ -141,7 +134,7 @@ impl Tag for metaflac::Tag {
 
     fn disc(&self) -> Option<u32> {
         metaflac::Tag::vorbis_comments(self)
-            .map(|v| {
+            .and_then(|v| {
                 v.get(FLAC_DISC).and_then(|s| {
                     if !s.is_empty() {
                         s[0].parse::<u32>().ok()
@@ -150,7 +143,6 @@ impl Tag for metaflac::Tag {
                     }
                 })
             })
-            .flatten()
     }
 
     fn set_disc(&mut self, disc: Option<u32>) {
@@ -164,8 +156,7 @@ impl Tag for metaflac::Tag {
 
     fn genre(&self) -> Option<&str> {
         metaflac::Tag::vorbis_comments(self)
-            .map(|v| v.genre().map(|v| v.iter().next()).flatten())
-            .flatten()
+            .and_then(|v| v.genre().and_then(|v| v.iter().next()))
             .map(|v| v.as_str())
     }
 
@@ -180,8 +171,7 @@ impl Tag for metaflac::Tag {
 
     fn custom_text(&self, key: &str) -> Option<&str> {
         metaflac::Tag::vorbis_comments(self)
-            .map(|v| v.get(key).map(|v| v.iter().next()).flatten())
-            .flatten()
+            .and_then(|v| v.get(key).and_then(|v| v.iter().next()))
             .map(|v| v.as_str())
     }
 
@@ -195,28 +185,30 @@ impl Tag for metaflac::Tag {
     }
 
     fn clear(&mut self) {
+        #![allow(clippy::unwrap_used)] // FIXME: Should deal with absence of media info
         let stream_info = metaflac::Tag::get_streaminfo(self).unwrap().to_owned();
         *self = metaflac::Tag::default();
         metaflac::Tag::set_streaminfo(self, stream_info);
     }
 
-    fn write_to(&self, file: &mut File) {
-        file.seek(io::SeekFrom::Start(0)).unwrap();
+    fn write_to(&self, file: &mut File) -> Result<()> {
+        file.seek(io::SeekFrom::Start(0))?;
         let data = metaflac::Tag::skip_metadata(file);
 
-        file.seek(io::SeekFrom::Start(0)).unwrap();
-        file.set_len(0).unwrap();
+        file.seek(io::SeekFrom::Start(0))?;
+        file.set_len(0)?;
 
-        file.write_all(b"fLaC").unwrap();
+        file.write_all(b"fLaC")?;
 
         let blocks: Vec<&metaflac::Block> = self.blocks().collect();
         let blocks_count = blocks.len();
-        for i in 0..blocks_count {
-            let block = blocks[i];
-            block.write_to(i == blocks_count - 1, file).unwrap();
+        for (i, block) in blocks.iter().enumerate() {
+            block.write_to(i == blocks_count - 1, file)?;
         }
 
-        file.write_all(&data[..]).unwrap();
+        file.write_all(&data[..])?;
+
+        Ok(())
     }
 }
 

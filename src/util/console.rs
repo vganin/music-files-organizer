@@ -39,7 +39,10 @@ impl Console {
     pub fn println(&self, str: &str) {
         match self.pbs.iter().find_or_first(|pb| !pb.is_hidden() && !pb.is_finished()) {
             Some(pb) => pb.println(str),
-            None => Term::stdout().write_line(str).unwrap()
+            None => {
+                #[allow(clippy::unwrap_used)]
+                Term::stdout().write_line(str).unwrap()
+            }
         }
     }
 
@@ -74,7 +77,7 @@ impl Console {
 
 const PROGRESS_REFRESH_RATE: u64 = 15u64;
 const PROGRESS_TICK_MS: u64 = 80u64;
-const TICK_STRINGS: &'static [&str] = &[
+const TICK_STRINGS: &[&str] = &[
     "⠋",
     "⠙",
     "⠹",

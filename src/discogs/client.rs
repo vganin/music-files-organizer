@@ -1,4 +1,4 @@
-use std::{cmp, thread, time};
+use std::{f64, thread, time};
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -292,11 +292,7 @@ impl DiscogsClient {
                 };
                 let rate_limit = header_as_number("X-Discogs-Ratelimit")?;
                 let rate_limit_used = header_as_number("X-Discogs-Ratelimit-Used")?;
-                let skip = cmp::min_by(
-                    rate_limit_used - rate_limit,
-                    0f64,
-                    |lhs, rhs| lhs.partial_cmp(rhs).unwrap(),
-                ) + 1f64;
+                let skip = f64::min(rate_limit_used - rate_limit, 0f64) + 1f64;
                 thread::sleep(time::Duration::from_secs_f64(skip * 60f64 / rate_limit));
             } else {
                 bail!("Expected successful status code but got {}", status)

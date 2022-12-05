@@ -74,7 +74,7 @@ impl Tag for mp4ameta::Tag {
     }
 
     fn year(&self) -> Option<i32> {
-        mp4ameta::Tag::year(self).map(|v| v.parse::<i32>().unwrap())
+        mp4ameta::Tag::year(self).and_then(|v| v.parse::<i32>().ok())
     }
 
     fn set_year(&mut self, year: Option<i32>) {
@@ -152,8 +152,9 @@ impl Tag for mp4ameta::Tag {
         mp4ameta::Tag::clear(self);
     }
 
-    fn write_to(&self, file: &mut File) {
-        file.seek(io::SeekFrom::Start(0)).unwrap();
-        mp4ameta::Tag::write_to(self, file).unwrap()
+    fn write_to(&self, file: &mut File) -> Result<()> {
+        file.seek(io::SeekFrom::Start(0))?;
+        mp4ameta::Tag::write_to(self, file)?;
+        Ok(())
     }
 }

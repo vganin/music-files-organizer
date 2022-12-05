@@ -1,6 +1,6 @@
 # Music Files Organizer
 
-Home project to import music into my media library.
+Personal project to organize my music library.
 
 ## What it can do
 

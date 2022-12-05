@@ -13,10 +13,10 @@ use tempfile::NamedTempFile;
 use walkdir::WalkDir;
 
 use crate::{Console, console_print, DiscogsClient, ImportArgs, pb_finish_with_message, pb_set_message, Tag, tag};
+use crate::discogs::client::MusicFilesToDiscogsRelease;
 use crate::tag::frame::FrameId;
 use crate::util::console_styleable::ConsoleStyleable;
-use crate::util::discogs::{cover_uri_from_discogs_info, DiscogsRelease, tag_from_discogs_info};
-use crate::util::path::PathExtensions;
+use crate::util::path_extensions::PathExtensions;
 use crate::util::r#const::COVER_FILE_NAME_WITHOUT_EXTENSION;
 use crate::util::transcode;
 
@@ -25,8 +25,8 @@ pub struct MusicFile {
     pub tag: Box<dyn Tag>,
 }
 
-struct MusicFileChange {
-    source: MusicFile,
+struct MusicFileChange<'a> {
+    source: &'a MusicFile,
     target: MusicFile,
     transcode_to_mp4: bool,
     source_file_len: u64,
@@ -43,8 +43,8 @@ struct Cleanup {
     path: PathBuf,
 }
 
-struct ChangeList {
-    music_files: Vec<MusicFileChange>,
+struct ChangeList<'a> {
+    music_files: Vec<MusicFileChange<'a>>,
     covers: Vec<CoverChange>,
     cleanups: Vec<Cleanup>,
 }
@@ -55,9 +55,9 @@ pub fn import(args: ImportArgs, discogs_client: &DiscogsClient, console: &mut Co
     }
 
     let music_files = get_music_files(&args.from, console)?;
-    let discogs_releases = discogs_client.fetch_by_music_files(music_files, console);
+    let discogs_releases = discogs_client.group_music_files_with_discogs_data(&music_files, console)?;
     let changes = calculate_changes(
-        discogs_releases,
+        &discogs_releases,
         &args.to,
         !args.dont_clean_target_folders,
         args.clean_source_folders,
@@ -86,7 +86,7 @@ pub fn import(args: ImportArgs, discogs_client: &DiscogsClient, console: &mut Co
         .interact()?
     {
         write_music_files(&changes.music_files, console)?;
-        download_covers(discogs_client, &changes.covers, console);
+        download_covers(discogs_client, &changes.covers, console)?;
         cleanup(&changes.cleanups)?;
     }
 
@@ -125,25 +125,25 @@ fn get_music_files(path: impl AsRef<Path>, console: &mut Console) -> Result<Vec<
     Ok(music_files)
 }
 
-fn calculate_changes(
-    discogs_releases: Vec<DiscogsRelease>,
+fn calculate_changes<'a>(
+    discogs_releases: &'a Vec<MusicFilesToDiscogsRelease>,
     import_path: &Path,
     clean_targets: bool,
     clean_sources: bool,
-) -> Result<ChangeList> {
+) -> Result<ChangeList<'a>> {
     let mut music_file_changes = Vec::new();
     let mut cover_changes = HashSet::new();
 
-    for DiscogsRelease { music_files, discogs_info } in discogs_releases {
+    for MusicFilesToDiscogsRelease { music_files, discogs_release } in discogs_releases {
         for music_file in music_files {
             let source_tag = &music_file.tag;
-            let target_tag = tag_from_discogs_info(source_tag, &discogs_info);
+            let target_tag = discogs_release.to_tag(&source_tag)?;
             let source_path = &music_file.file_path;
             let source_extension = source_path.extension_or_empty();
             let transcode_to_mp4 = source_extension == "flac";
-            let target_folder_path = import_path.join(music_folder_path(&*target_tag)?);
+            let target_folder_path = import_path.join(music_folder_path(&target_tag)?);
             let target_extension = if transcode_to_mp4 { "m4a" } else { source_extension };
-            let target_path = target_folder_path.join(music_file_name(&*target_tag, target_extension)?);
+            let target_path = target_folder_path.join(music_file_name(&target_tag, target_extension)?);
             let bytes_to_transfer = fs::metadata(source_path)?.len();
 
             music_file_changes.push(MusicFileChange {
@@ -156,7 +156,8 @@ fn calculate_changes(
                 source_file_len: bytes_to_transfer,
             });
 
-            if let Some(uri) = cover_uri_from_discogs_info(&discogs_info) {
+            if let Some(best_image) = discogs_release.best_image() {
+                let uri = &best_image.resource_url;
                 let uri_as_file_path = PathBuf::from(Url::parse(uri)?.path());
                 let extension = uri_as_file_path.extension_or_empty();
                 let file_name = PathBuf::from(COVER_FILE_NAME_WITHOUT_EXTENSION).with_extension(extension);
@@ -176,7 +177,7 @@ fn calculate_changes(
         let lhs_year = lhs.year().unwrap_or(i32::MIN);
         let rhs_year = rhs.year().unwrap_or(i32::MIN);
         if lhs_album == rhs_album && lhs_year == rhs_year {
-            lhs.track().cmp(&rhs.track())
+            lhs.track_number().cmp(&rhs.track_number())
         } else if lhs_year == rhs_year {
             lhs_album.cmp(rhs_album)
         } else {
@@ -337,18 +338,20 @@ fn download_covers(
     discogs_client: &DiscogsClient,
     changes: &Vec<CoverChange>,
     console: &mut Console,
-) {
-    if changes.is_empty() { return; };
+) -> Result<()> {
+    if changes.is_empty() { return Ok(()); };
 
     let count = changes.len();
     let pb = console.new_default_progress_bar(!0);
 
     for (index, change) in changes.iter().enumerate() {
         pb_set_message!(pb, "Downloading cover {}/{}", index + 1, count);
-        discogs_client.download_cover(&change.uri, &change.path, &pb, console);
+        discogs_client.download_cover(&change.uri, &change.path, &pb, console)?;
     }
 
     pb_finish_with_message!(pb, "{}", format!("Downloaded {} cover(s)", count).styled().green());
+
+    Ok(())
 }
 
 fn cleanup(cleanups: &[Cleanup]) -> Result<()> {
@@ -436,7 +439,7 @@ fn find_cleanups(
     Ok(result.into_iter().collect())
 }
 
-fn music_folder_path(tag: &dyn Tag) -> Result<PathBuf> {
+fn music_folder_path(tag: &Box<dyn Tag>) -> Result<PathBuf> {
     let context = |frame_id: FrameId| format!("No {} to form music folder name", frame_id);
     let album_artist = tag.album_artist().with_context(|| context(FrameId::AlbumArtist))?;
     let year = tag.year().with_context(|| context(FrameId::Year))?;
@@ -449,9 +452,9 @@ fn music_folder_path(tag: &dyn Tag) -> Result<PathBuf> {
     Ok(path)
 }
 
-fn music_file_name(tag: &dyn Tag, extension: &str) -> Result<String> {
+fn music_file_name(tag: &Box<dyn Tag>, extension: &str) -> Result<String> {
     let context = |frame_id: FrameId| format!("No {} to form music file name", frame_id);
-    let track = tag.track().with_context(|| context(FrameId::Track))?;
+    let track = tag.track_number().with_context(|| context(FrameId::Track))?;
     let title = tag.title().with_context(|| context(FrameId::Title))?;
 
     Ok(sanitize_path(match tag.disc() {

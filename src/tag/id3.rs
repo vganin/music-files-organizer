@@ -97,11 +97,11 @@ impl Tag for id3::Tag {
         }
     }
 
-    fn track(&self) -> Option<u32> {
+    fn track_number(&self) -> Option<u32> {
         id3::TagLike::track(self)
     }
 
-    fn set_track(&mut self, track: Option<u32>) {
+    fn set_track_number(&mut self, track: Option<u32>) {
         if let Some(track) = track {
             id3::TagLike::set_track(self, track)
         } else {

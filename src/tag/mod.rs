@@ -33,8 +33,8 @@ pub trait Tag: DynClone {
     fn year(&self) -> Option<i32>;
     fn set_year(&mut self, year: Option<i32>);
 
-    fn track(&self) -> Option<u32>;
-    fn set_track(&mut self, track: Option<u32>);
+    fn track_number(&self) -> Option<u32>;
+    fn set_track_number(&mut self, track: Option<u32>);
 
     fn total_tracks(&self) -> Option<u32>;
     fn set_total_tracks(&mut self, total_tracks: Option<u32>);
@@ -61,7 +61,7 @@ impl dyn Tag + '_ {
             FrameId::AlbumArtist => self.album_artist().map(|v| FrameContent::Str(v.to_owned())),
             FrameId::Artist => self.artist().map(|v| FrameContent::Str(v.to_owned())),
             FrameId::Year => self.year().map(FrameContent::I32),
-            FrameId::Track => self.track().map(FrameContent::U32),
+            FrameId::Track => self.track_number().map(FrameContent::U32),
             FrameId::TotalTracks => self.total_tracks().map(FrameContent::U32),
             FrameId::Disc => self.disc().map(FrameContent::U32),
             FrameId::Genre => self.genre().map(|v| FrameContent::Str(v.to_owned())),
@@ -86,7 +86,7 @@ impl dyn Tag + '_ {
             FrameId::AlbumArtist => self.set_album_artist(Some(content.as_str()?.to_owned())),
             FrameId::Artist => self.set_artist(Some(content.as_str()?.to_owned())),
             FrameId::Year => self.set_year(Some(content.as_i32()?)),
-            FrameId::Track => self.set_track(Some(content.as_u32()?)),
+            FrameId::Track => self.set_track_number(Some(content.as_u32()?)),
             FrameId::TotalTracks => self.set_total_tracks(Some(content.as_u32()?)),
             FrameId::Disc => self.set_disc(Some(content.as_u32()?)),
             FrameId::Genre => self.set_genre(Some(content.as_str()?.to_owned())),
@@ -104,7 +104,7 @@ impl dyn Tag + '_ {
             FrameId::AlbumArtist => self.set_album_artist(None),
             FrameId::Artist => self.set_artist(None),
             FrameId::Year => self.set_year(None),
-            FrameId::Track => self.set_track(None),
+            FrameId::Track => self.set_track_number(None),
             FrameId::TotalTracks => self.set_total_tracks(None),
             FrameId::Disc => self.set_disc(None),
             FrameId::Genre => self.set_genre(None),

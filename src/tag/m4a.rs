@@ -85,11 +85,11 @@ impl Tag for mp4ameta::Tag {
         }
     }
 
-    fn track(&self) -> Option<u32> {
+    fn track_number(&self) -> Option<u32> {
         mp4ameta::Tag::track_number(self).map(|v| v as u32)
     }
 
-    fn set_track(&mut self, track: Option<u32>) {
+    fn set_track_number(&mut self, track: Option<u32>) {
         if let Some(track) = track {
             mp4ameta::Tag::set_track_number(self, track as u16)
         } else {

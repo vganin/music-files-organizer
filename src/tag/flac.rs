@@ -109,13 +109,13 @@ impl Tag for metaflac::Tag {
         }
     }
 
-    fn track(&self) -> Option<u32> {
+    fn track_number(&self) -> Option<u32> {
         metaflac::Tag::vorbis_comments(self)
             .map(|v| v.track().or_else(|| Some(vorbis_comment_as_pair(v, FLAC_TRACK)?.0)))
             .flatten()
     }
 
-    fn set_track(&mut self, track: Option<u32>) {
+    fn set_track_number(&mut self, track: Option<u32>) {
         let comments = metaflac::Tag::vorbis_comments_mut(self);
         if let Some(track) = track {
             comments.set_track(track);

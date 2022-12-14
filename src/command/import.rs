@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use dialoguer::Confirm;
+use itertools::Itertools;
 use progress_streams::{ProgressReader, ProgressWriter};
 use reqwest::Url;
 use sanitize_filename::{Options, sanitize_with_options};
@@ -89,6 +90,7 @@ pub fn import(args: ImportArgs, discogs_client: &DiscogsClient, console: &mut Co
         write_music_files(&changes.music_files, console)?;
         download_covers(discogs_client, &changes.covers, console)?;
         cleanup(&changes.cleanups)?;
+        fsync(&changes, console)?;
     }
 
     Ok(())
@@ -438,6 +440,23 @@ fn find_cleanups(
     }
 
     Ok(result.into_iter().collect())
+}
+
+fn fsync(changes: &ChangeList, console: &mut Console) -> Result<()> {
+    let pb = console.new_default_spinner();
+
+    let folders = changes.music_files.iter().map(|v| &v.target.file_path)
+        .chain(changes.covers.iter().map(|v| &v.path))
+        .map(|v| v.parent_or_empty())
+        .unique()
+        .collect_vec();
+
+    for folder in folders {
+        pb_set_message!(pb, "Syncing {}", folder.display().path_styled());
+        File::open(folder)?.sync_all()?;
+    }
+
+    Ok(())
 }
 
 fn music_folder_path(tag: &dyn Tag) -> Result<PathBuf> {

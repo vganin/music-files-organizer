@@ -1,3 +1,4 @@
+use std::fmt::{Debug, Formatter};
 use std::fs::File;
 use std::io;
 use std::io::{Seek, Write};
@@ -121,6 +122,18 @@ impl dyn Tag + '_ {
         }
 
         Ok(())
+    }
+}
+
+impl Debug for dyn Tag {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut debug_tuple = f.debug_tuple("");
+        for frame_id in self.frame_ids() {
+            if let Some(frame_content) = self.frame_content(&frame_id) {
+                debug_tuple.field(&frame_content);
+            }
+        }
+        debug_tuple.finish()
     }
 }
 

@@ -1,19 +1,19 @@
 use std::ops::Deref;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use dyn_clone::clone_box;
+use fuzzy_matcher::FuzzyMatcher;
+use fuzzy_matcher::skim::SkimMatcherV2;
 use itertools::Itertools;
 
-use crate::discogs::model::DiscogsRelease;
+use crate::discogs::model::{DiscogsRelease, DiscogsTrack};
 use crate::tag::Tag;
 
 impl DiscogsRelease {
     #[allow(clippy::borrowed_box)] // FIXME: Fix reference to Box
     pub fn to_tag(&self, original_tag: &Box<dyn Tag>) -> Result<Box<dyn Tag>> {
-        let track_number = original_tag.track_number().context("No track number")?;
         let track_list = self.valid_track_list();
-        let track_from_original_tag = track_list.get(track_number as usize - 1)
-            .with_context(|| format!("Failed to find track {} from track list: {:?}", track_number, track_list))?;
+        let (track_number, track) = self.find_track_from(original_tag)?;
         let album_artists: Vec<(&str, &str)> = self.artists
             .iter()
             .map(|artist| (
@@ -21,7 +21,7 @@ impl DiscogsRelease {
                 artist.join.as_deref().unwrap_or("&")
             ))
             .collect_vec();
-        let track_artists: Option<Vec<(&str, &str)>> = track_from_original_tag.artists
+        let track_artists: Option<Vec<(&str, &str)>> = track.artists
             .as_ref()
             .map(|artists| {
                 artists
@@ -36,7 +36,7 @@ impl DiscogsRelease {
         let mut new_tag = clone_box(original_tag.deref());
 
         new_tag.clear();
-        new_tag.set_title(Some(track_from_original_tag.proper_title().to_owned()));
+        new_tag.set_title(Some(track.proper_title().to_owned()));
         new_tag.set_album(Some(self.proper_title().to_owned()));
         new_tag.set_album_artist(Some(
             if track_artists.is_some() {
@@ -68,6 +68,31 @@ impl DiscogsRelease {
         new_tag.set_custom_text(DISCOGS_RELEASE_TAG.to_owned(), Some(self.uri.to_owned()));
 
         Ok(new_tag)
+    }
+
+    #[allow(clippy::borrowed_box)] // FIXME: Fix reference to Box
+    fn find_track_from(&self, original_tag: &Box<dyn Tag>) -> Result<(u32, &DiscogsTrack)> {
+        let track_list = self.valid_track_list();
+
+        if let Some(track_number) = original_tag.track_number() {
+            if let Some(track) = track_list.get(track_number as usize - 1) {
+                return Ok((track_number, track));
+            }
+        }
+
+        let matcher = SkimMatcherV2::default();
+        let pattern = original_tag.title()
+            .with_context(|| format!("Track contains no title: {:?}", original_tag))?;
+
+        for (track_index, track) in track_list.iter().enumerate() {
+            if matcher.fuzzy_match(&track.title, pattern).is_some() {
+                let position = &track.position;
+                let position = position.parse::<u32>().unwrap_or(track_index as u32 + 1);
+                return Ok((position, track));
+            }
+        }
+
+        bail!("Failed to find track {} from track list: {:?}", original_tag.title().unwrap_or("with no title"), track_list)
     }
 }
 

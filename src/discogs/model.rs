@@ -23,6 +23,7 @@ pub struct DiscogsTrack {
     // It's literally "type_" in format
     pub type_: String,
     pub artists: Option<Vec<DiscogsArtist>>,
+    pub position: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

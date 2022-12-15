@@ -15,7 +15,7 @@ pub enum FrameId {
     CustomText { key: String },
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Debug)]
 pub enum FrameContent {
     Str(String),
     I32(i32),

@@ -14,7 +14,7 @@ use sanitize_filename::{Options, sanitize_with_options};
 use tempfile::NamedTempFile;
 use walkdir::WalkDir;
 
-use crate::{Console, console_print, DiscogsClient, ImportArgs, pb_finish_with_message, pb_set_message, Tag, tag};
+use crate::{Console, console_print, DiscogsClient, ImportArgs, pb_finish_with_message, pb_set_message, Tag, tag, util};
 use crate::discogs::client::MusicFilesToDiscogsRelease;
 use crate::tag::frame::FrameId;
 use crate::util::console_styleable::ConsoleStyleable;
@@ -443,8 +443,6 @@ fn find_cleanups(
 }
 
 fn fsync(changes: &ChangeList, console: &mut Console) -> Result<()> {
-    let pb = console.new_default_spinner();
-
     let folders = changes.music_files.iter().map(|v| &v.target.file_path)
         .chain(changes.covers.iter().map(|v| &v.path))
         .map(|v| v.parent_or_empty())
@@ -452,8 +450,7 @@ fn fsync(changes: &ChangeList, console: &mut Console) -> Result<()> {
         .collect_vec();
 
     for folder in folders {
-        pb_set_message!(pb, "Syncing {}", folder.display().path_styled());
-        File::open(folder)?.sync_all()?;
+        util::fsync::fsync(folder, console)?;
     }
 
     Ok(())

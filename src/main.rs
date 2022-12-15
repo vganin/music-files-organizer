@@ -15,6 +15,7 @@ use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 
 use crate::command::add_covers::add_covers;
+use crate::command::fsync::fsync;
 use crate::command::import::import;
 use crate::discogs::client::DiscogsClient;
 use crate::tag::Tag;
@@ -40,6 +41,7 @@ struct Cli {
 enum Command {
     Import(ImportArgs),
     AddCovers(AddCoversArguments),
+    Fsync(FsyncArguments),
 }
 
 #[derive(Args)]
@@ -64,6 +66,12 @@ pub struct AddCoversArguments {
 
     #[clap(long)]
     skip_if_present: bool,
+}
+
+#[derive(Args)]
+pub struct FsyncArguments {
+    #[clap(parse(from_os_str))]
+    path: PathBuf,
 }
 
 fn main() -> ExitCode {
@@ -95,7 +103,8 @@ fn main_with_result() -> Result<()> {
 
     match cli.command {
         Command::Import(args) => import(args, &discogs_client, &mut console)?,
-        Command::AddCovers(args) => add_covers(args, &discogs_client, &mut console)?
+        Command::AddCovers(args) => add_covers(args, &discogs_client, &mut console)?,
+        Command::Fsync(args) => fsync(args, &mut console)?,
     }
 
     Ok(())

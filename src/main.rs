@@ -79,6 +79,7 @@ fn main() -> ExitCode {
         Ok(_) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("{}", error.deref().error_styled());
+            error.chain().skip(1).for_each(|cause| eprintln!("{} {}", "↳".error_styled(), cause.error_styled()));
             eprintln!("\n{}", error.backtrace().error_styled());
             ExitCode::FAILURE
         }

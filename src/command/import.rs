@@ -1,14 +1,18 @@
 use std::{fs, io};
 use std::collections::HashSet;
+use std::fmt::Write;
 use std::fs::File;
 use std::io::Seek;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 use anyhow::{bail, Context, Result};
-use dialoguer::Confirm;
+use dialoguer::{Confirm, Editor};
+use dyn_clone::clone_box;
 use itertools::Itertools;
 use progress_streams::{ProgressReader, ProgressWriter};
+use regex::Regex;
 use reqwest::Url;
 use sanitize_filename::{Options, sanitize_with_options};
 use tempfile::NamedTempFile;
@@ -16,7 +20,7 @@ use walkdir::WalkDir;
 
 use crate::{Console, console_print, DiscogsClient, ImportArgs, pb_finish_with_message, pb_set_message, Tag, tag, util};
 use crate::discogs::client::MusicFilesToDiscogsRelease;
-use crate::tag::frame::FrameId;
+use crate::tag::frame::{FrameContent, FrameId};
 use crate::util::console_styleable::ConsoleStyleable;
 use crate::util::path_extensions::PathExtensions;
 use crate::util::r#const::COVER_FILE_NAME_WITHOUT_EXTENSION;
@@ -25,6 +29,18 @@ use crate::util::transcode;
 pub struct MusicFile {
     pub file_path: PathBuf,
     pub tag: Box<dyn Tag>,
+}
+
+impl MusicFile {
+    fn from_tag(tag: Box<dyn Tag>, base_path: &Path, transcode_to_mp4: bool, source_extension: &str) -> Result<Self> {
+        let target_folder_path = base_path.join(music_folder_path(tag.deref())?);
+        let target_extension = if transcode_to_mp4 { "m4a" } else { source_extension };
+        let target_path = target_folder_path.join(music_file_name(tag.deref(), target_extension)?);
+        Ok(MusicFile {
+            file_path: target_path,
+            tag,
+        })
+    }
 }
 
 struct MusicFileChange<'a> {
@@ -58,7 +74,7 @@ pub fn import(args: ImportArgs, discogs_client: &DiscogsClient, console: &mut Co
 
     let music_files = get_music_files(&args.from, console)?;
     let discogs_releases = discogs_client.group_music_files_with_discogs_data(&music_files, console)?;
-    let changes = calculate_changes(
+    let mut changes = calculate_changes(
         &discogs_releases,
         &args.to,
         !args.dont_clean_target_folders,
@@ -70,14 +86,30 @@ pub fn import(args: ImportArgs, discogs_client: &DiscogsClient, console: &mut Co
         return Ok(());
     }
 
-    if Confirm::new()
-        .with_prompt("Do you want to print changes?")
-        .default(false)
-        .show_default(true)
-        .wait_for_newline(true)
-        .interact()?
-    {
-        print_changes_details(&changes, console);
+    loop {
+        if Confirm::new()
+            .with_prompt("Do you want to review changes?")
+            .default(false)
+            .show_default(true)
+            .wait_for_newline(true)
+            .interact()?
+        {
+            print_changes_details(&changes, console);
+
+            if Confirm::new()
+                .with_prompt("Do you want to edit changes?")
+                .default(false)
+                .show_default(true)
+                .wait_for_newline(true)
+                .interact()?
+            {
+                changes = edit_changes(&args.to, changes)?;
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
     }
 
     if Confirm::new()
@@ -144,20 +176,14 @@ fn calculate_changes<'a>(
             let source_path = &music_file.file_path;
             let source_extension = source_path.extension_or_empty();
             let transcode_to_mp4 = source_extension == "flac";
-            let target_folder_path = import_path.join(music_folder_path(target_tag.deref())?);
-            let target_extension = if transcode_to_mp4 { "m4a" } else { source_extension };
-            let target_path = target_folder_path.join(music_file_name(target_tag.deref(), target_extension)?);
             let bytes_to_transfer = fs::metadata(source_path)?.len();
 
-            music_file_changes.push(MusicFileChange {
+            let music_file_change = MusicFileChange {
                 source: music_file,
-                target: MusicFile {
-                    file_path: target_path,
-                    tag: target_tag,
-                },
+                target: MusicFile::from_tag(target_tag, import_path, transcode_to_mp4, source_extension)?,
                 transcode_to_mp4,
                 source_file_len: bytes_to_transfer,
-            });
+            };
 
             if let Some(best_image) = discogs_release.best_image() {
                 let uri = &best_image.resource_url;
@@ -165,10 +191,12 @@ fn calculate_changes<'a>(
                 let extension = uri_as_file_path.extension_or_empty();
                 let file_name = PathBuf::from(COVER_FILE_NAME_WITHOUT_EXTENSION).with_extension(extension);
                 cover_changes.insert(CoverChange {
-                    path: target_folder_path.join(file_name),
+                    path: music_file_change.target.file_path.parent_or_empty().join(file_name),
                     uri: uri.to_owned(),
                 });
             }
+
+            music_file_changes.push(music_file_change);
         }
     }
 
@@ -237,8 +265,8 @@ fn print_changes_details(changes: &ChangeList, console: &Console) {
         let source_tag = &source.tag;
         let target_tag = &target.tag;
         for frame_id in target_tag.frame_ids() {
-            let source_frame_value = source_tag.frame_content(&frame_id).map(|v| v.stringify_content());
-            let target_frame_value = target_tag.frame_content(&frame_id).map(|v| v.stringify_content());
+            let source_frame_value = source_tag.frame_content(&frame_id).map(|v| v.to_string());
+            let target_frame_value = target_tag.frame_content(&frame_id).map(|v| v.to_string());
             if target_frame_value != source_frame_value {
                 console_print!(
                     console,
@@ -273,6 +301,82 @@ fn print_changes_details(changes: &ChangeList, console: &Console) {
             cleanup.path.display().path_styled(),
         );
         step_number += 1;
+    }
+}
+
+fn edit_changes<'a, 'b>(
+    import_path: &'a Path,
+    changes: ChangeList<'b>,
+) -> Result<ChangeList<'b>> {
+    const TRACK_DELIMITER: &str = "--------------------------";
+    let line_pattern: Regex = Regex::new(r"^(.+): (.*)$")?;
+    let mut editor_prompt = String::new();
+
+    for music_file in &changes.music_files {
+        let tag = &music_file.target.tag;
+        for frame_id in &tag.frame_ids() {
+            let frame_content = tag.frame_content(frame_id);
+            writeln!(&mut editor_prompt, "{}: {}", frame_id, frame_content.map(|v| v.to_string()).unwrap_or_default())?;
+        }
+
+        editor_prompt.push_str(TRACK_DELIMITER);
+        editor_prompt.push('\n');
+    }
+
+    if let Some(edited) = Editor::new().edit(&editor_prompt)? {
+        let mut edited_lines = edited.lines();
+        let mut new_music_file_changes: Vec<MusicFileChange> = Vec::new();
+
+        for music_file in changes.music_files {
+            let old_tag = &music_file.target.tag;
+            let mut new_tag = clone_box(old_tag.deref());
+            new_tag.clear();
+
+            loop {
+                let line = edited_lines.next().context("Failed to find meta for track")?;
+
+                if line == TRACK_DELIMITER {
+                    break;
+                }
+
+                let invalid_line_context = || format!("Invalid line: {}", line);
+                let captures = line_pattern.captures(line).with_context(invalid_line_context)?;
+                let frame_id_as_string = captures.get(1).with_context(invalid_line_context)?.as_str();
+                let frame_content_as_string = captures.get(2).with_context(invalid_line_context)?.as_str();
+                let frame_id = FrameId::from_str(frame_id_as_string)?;
+
+                let frame_content = match frame_id {
+                    FrameId::Title |
+                    FrameId::Album |
+                    FrameId::AlbumArtist |
+                    FrameId::Artist |
+                    FrameId::Genre |
+                    FrameId::CustomText { .. } => FrameContent::Str(frame_content_as_string.to_owned()),
+                    FrameId::Year => FrameContent::I32(frame_content_as_string.parse::<i32>()?),
+                    FrameId::Track |
+                    FrameId::TotalTracks |
+                    FrameId::Disc => FrameContent::U32(frame_content_as_string.parse::<u32>()?),
+                };
+                new_tag.set_frame(&frame_id, Some(frame_content))?;
+            }
+
+            new_music_file_changes.push(MusicFileChange {
+                target: MusicFile::from_tag(
+                    new_tag,
+                    import_path,
+                    music_file.transcode_to_mp4,
+                    music_file.source.file_path.extension_or_empty(),
+                )?,
+                ..music_file
+            })
+        }
+
+        Ok(ChangeList {
+            music_files: new_music_file_changes,
+            ..changes
+        })
+    } else {
+        Ok(changes)
     }
 }
 

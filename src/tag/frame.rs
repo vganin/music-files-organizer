@@ -1,4 +1,5 @@
 use std::fmt::{Display, Formatter};
+use std::str::FromStr;
 
 use anyhow::{bail, Result};
 
@@ -62,8 +63,27 @@ impl Display for FrameId {
     }
 }
 
-impl FrameContent {
-    pub fn stringify_content(&self) -> String {
+impl FromStr for FrameId {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Ok(match s {
+            "Title" => FrameId::Title,
+            "Album" => FrameId::Album,
+            "Album Artist" => FrameId::AlbumArtist,
+            "Artist" => FrameId::Artist,
+            "Year" => FrameId::Year,
+            "Track" => FrameId::Track,
+            "Total Tracks" => FrameId::TotalTracks,
+            "Disc" => FrameId::Disc,
+            "Genre" => FrameId::Genre,
+            key => FrameId::CustomText { key: key.to_owned() },
+        })
+    }
+}
+
+impl ToString for FrameContent {
+    fn to_string(&self) -> String {
         match self {
             FrameContent::Str(v) => v.to_owned(),
             FrameContent::I32(v) => v.to_string(),

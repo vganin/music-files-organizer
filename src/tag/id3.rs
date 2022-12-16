@@ -149,8 +149,9 @@ impl Tag for id3::Tag {
     }
 
     fn custom_text(&self, key: &str) -> Option<&str> {
-        id3::TagLike::get(self, key)
-            .and_then(|f| f.content().extended_text()).map(|v| v.value.as_str())
+        id3::Tag::extended_texts(self)
+            .find(|v| v.description == key)
+            .map(|v| v.value.as_str())
     }
 
     fn set_custom_text(&mut self, key: String, value: Option<String>) {
@@ -160,7 +161,7 @@ impl Tag for id3::Tag {
                 value,
             });
         } else {
-            id3::TagLike::remove(self, &key);
+            id3::TagLike::remove_extended_text(self, Some(&key), None);
         }
     }
 

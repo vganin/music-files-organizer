@@ -20,6 +20,7 @@ use walkdir::WalkDir;
 
 use crate::{Console, console_print, DiscogsClient, ImportArgs, pb_finish_with_message, pb_set_message, Tag, tag, util};
 use crate::discogs::client::MusicFilesToDiscogsRelease;
+use crate::discogs::model::DiscogsRelease;
 use crate::tag::frame::{FrameContent, FrameId};
 use crate::util::console_styleable::ConsoleStyleable;
 use crate::util::path_extensions::PathExtensions;
@@ -48,6 +49,7 @@ struct MusicFileChange<'a> {
     target: MusicFile,
     transcode_to_mp4: bool,
     source_file_len: u64,
+    discogs_release: &'a DiscogsRelease,
 }
 
 #[derive(Hash, PartialEq, Eq)]
@@ -74,12 +76,8 @@ pub fn import(args: ImportArgs, discogs_client: &DiscogsClient, console: &mut Co
 
     let music_files = get_music_files(&args.from, console)?;
     let discogs_releases = discogs_client.group_music_files_with_discogs_data(&music_files, console)?;
-    let mut changes = calculate_changes(
-        &discogs_releases,
-        &args.to,
-        !args.dont_clean_target_folders,
-        args.clean_source_folders,
-    )?;
+
+    let mut changes = calculate_changes(&discogs_releases, &args)?;
 
     if changes.music_files.is_empty() && changes.covers.is_empty() {
         console_print!(console, "{}", "Nothing to do, all good".styled().green());
@@ -103,7 +101,7 @@ pub fn import(args: ImportArgs, discogs_client: &DiscogsClient, console: &mut Co
                 .wait_for_newline(true)
                 .interact()?
             {
-                changes = edit_changes(&args.to, changes)?;
+                changes = edit_changes(changes, &args)?;
             } else {
                 break;
             }
@@ -162,12 +160,9 @@ fn get_music_files(path: impl AsRef<Path>, console: &mut Console) -> Result<Vec<
 
 fn calculate_changes<'a>(
     discogs_releases: &'a Vec<MusicFilesToDiscogsRelease>,
-    import_path: &Path,
-    clean_targets: bool,
-    clean_sources: bool,
+    args: &ImportArgs,
 ) -> Result<ChangeList<'a>> {
     let mut music_file_changes = Vec::new();
-    let mut cover_changes = HashSet::new();
 
     for MusicFilesToDiscogsRelease { music_files, discogs_release } in discogs_releases {
         for music_file in music_files {
@@ -180,21 +175,11 @@ fn calculate_changes<'a>(
 
             let music_file_change = MusicFileChange {
                 source: music_file,
-                target: MusicFile::from_tag(target_tag, import_path, transcode_to_mp4, source_extension)?,
+                target: MusicFile::from_tag(target_tag, &args.to, transcode_to_mp4, source_extension)?,
                 transcode_to_mp4,
                 source_file_len: bytes_to_transfer,
+                discogs_release,
             };
-
-            if let Some(best_image) = discogs_release.best_image() {
-                let uri = &best_image.resource_url;
-                let uri_as_file_path = PathBuf::from(Url::parse(uri)?.path());
-                let extension = uri_as_file_path.extension_or_empty();
-                let file_name = PathBuf::from(COVER_FILE_NAME_WITHOUT_EXTENSION).with_extension(extension);
-                cover_changes.insert(CoverChange {
-                    path: music_file_change.target.file_path.parent_or_empty().join(file_name),
-                    uri: uri.to_owned(),
-                });
-            }
 
             music_file_changes.push(music_file_change);
         }
@@ -216,13 +201,24 @@ fn calculate_changes<'a>(
         }
     });
 
-    let cover_changes = cover_changes.into_iter().collect();
+    full_change_list(
+        music_file_changes,
+        args,
+    )
+}
+
+fn full_change_list<'a>(
+    music_file_changes: Vec<MusicFileChange<'a>>,
+    args: &ImportArgs,
+) -> Result<ChangeList<'a>> {
+    let cover_changes = find_cover_changes(
+        &music_file_changes
+    )?;
 
     let cleanups = find_cleanups(
         &music_file_changes,
         &cover_changes,
-        clean_targets,
-        clean_sources,
+        args,
     )?;
 
     Ok(ChangeList {
@@ -304,10 +300,10 @@ fn print_changes_details(changes: &ChangeList, console: &Console) {
     }
 }
 
-fn edit_changes<'a, 'b>(
-    import_path: &'a Path,
-    changes: ChangeList<'b>,
-) -> Result<ChangeList<'b>> {
+fn edit_changes<'a>(
+    changes: ChangeList<'a>,
+    args: &ImportArgs,
+) -> Result<ChangeList<'a>> {
     const TRACK_DELIMITER: &str = "--------------------------";
     let line_pattern: Regex = Regex::new(r"^(.+): (.*)$")?;
     let mut editor_prompt = String::new();
@@ -363,7 +359,7 @@ fn edit_changes<'a, 'b>(
             new_music_file_changes.push(MusicFileChange {
                 target: MusicFile::from_tag(
                     new_tag,
-                    import_path,
+                    &args.to,
                     music_file.transcode_to_mp4,
                     music_file.source.file_path.extension_or_empty(),
                 )?,
@@ -371,10 +367,11 @@ fn edit_changes<'a, 'b>(
             })
         }
 
-        Ok(ChangeList {
-            music_files: new_music_file_changes,
-            ..changes
-        })
+
+        Ok(full_change_list(
+            new_music_file_changes,
+            args,
+        )?)
     } else {
         Ok(changes)
     }
@@ -490,12 +487,36 @@ fn cleanup(cleanups: &[Cleanup]) -> Result<()> {
     Ok(())
 }
 
+fn find_cover_changes(
+    music_files_changes: &Vec<MusicFileChange>
+) -> Result<Vec<CoverChange>> {
+    let mut cover_changes = HashSet::new();
+
+    for music_file_change in music_files_changes {
+        let discogs_release = music_file_change.discogs_release;
+        if let Some(best_image) = discogs_release.best_image() {
+            let uri = &best_image.resource_url;
+            let uri_as_file_path = PathBuf::from(Url::parse(uri)?.path());
+            let extension = uri_as_file_path.extension_or_empty();
+            let file_name = PathBuf::from(COVER_FILE_NAME_WITHOUT_EXTENSION).with_extension(extension);
+            cover_changes.insert(CoverChange {
+                path: music_file_change.target.file_path.parent_or_empty().join(file_name),
+                uri: uri.to_owned(),
+            });
+        }
+    }
+
+    Ok(cover_changes.into_iter().collect_vec())
+}
+
 fn find_cleanups(
     music_files: &Vec<MusicFileChange>,
     covers: &Vec<CoverChange>,
-    clean_targets: bool,
-    clean_sources: bool,
+    args: &ImportArgs,
 ) -> Result<Vec<Cleanup>> {
+    let clean_targets = !args.dont_clean_target_folders;
+    let clean_sources = args.clean_source_folders;
+
     let mut result = HashSet::new();
 
     let mut source_folder_paths = HashSet::new();

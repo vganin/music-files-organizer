@@ -49,7 +49,7 @@ struct MusicFileChange<'a> {
     target: MusicFile,
     transcode_to_mp4: bool,
     source_file_len: u64,
-    discogs_release: &'a DiscogsRelease,
+    discogs_release: &'a Option<DiscogsRelease>,
 }
 
 #[derive(Hash, PartialEq, Eq)]
@@ -167,7 +167,11 @@ fn calculate_changes<'a>(
     for MusicFilesToDiscogsRelease { music_files, discogs_release } in discogs_releases {
         for music_file in music_files {
             let source_tag = &music_file.tag;
-            let target_tag = discogs_release.to_tag(source_tag)?;
+            let target_tag = if let Some(discogs_release) = discogs_release {
+                discogs_release.to_tag(source_tag)?
+            } else {
+                clone_box(music_file.tag.deref())
+            };
             let source_path = &music_file.file_path;
             let source_extension = source_path.extension_or_empty();
             let transcode_to_mp4 = source_extension == "flac";
@@ -494,7 +498,7 @@ fn find_cover_changes(
 
     for music_file_change in music_files_changes {
         let discogs_release = music_file_change.discogs_release;
-        if let Some(best_image) = discogs_release.best_image() {
+        if let Some(best_image) = discogs_release.as_ref().and_then(|v| v.best_image()) {
             let uri = &best_image.resource_url;
             let uri_as_file_path = PathBuf::from(Url::parse(uri)?.path());
             let extension = uri_as_file_path.extension_or_empty();

@@ -5,7 +5,7 @@ use std::fmt::Display;
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
-use dialoguer::Input;
+use dialoguer::{Input, Select};
 use indicatif::ProgressBar;
 use itertools::Itertools;
 use progress_streams::ProgressWriter;
@@ -56,7 +56,7 @@ impl DiscogsClient {
 
 pub struct MusicFilesToDiscogsRelease<'a> {
     pub music_files: Vec<&'a MusicFile>,
-    pub discogs_release: DiscogsRelease,
+    pub discogs_release: Option<DiscogsRelease>,
 }
 
 impl DiscogsClient {
@@ -88,27 +88,33 @@ impl DiscogsClient {
                 .unique()
                 .collect();
 
-            let discogs_release: DiscogsRelease = if let (Some(first_album), Some(first_track)) = (albums.first(), tracks.first()) {
+            let discogs_release: Option<DiscogsRelease> = if let (Some(first_album), Some(first_track)) = (albums.first(), tracks.first()) {
                 if let Some(discogs_release) = self.fetch_release_by_meta(&artists, first_album, first_track, tracks.len(), console)? {
-                    discogs_release
+                    Some(discogs_release)
+                } else if let Some(discogs_release_id) = ask_discogs_release_id(
+                    &format!(
+                        "Can't find release for {} - {}",
+                        artists.join(", ").tag_styled(),
+                        first_album.tag_styled()
+                    )
+                )? {
+                    Some(self.fetch_release_by_id(&discogs_release_id, console)?)
                 } else {
-                    let discogs_release_id = ask_discogs_release_id(
-                        &format!(
-                            "Can't find release for {} - {}",
-                            artists.join(", ").tag_styled(),
-                            first_album.tag_styled()
-                        )
-                    )?;
-                    self.fetch_release_by_id(&discogs_release_id, console)?
+                    None
                 }
+            } else if let Some(discogs_release_id) = ask_discogs_release_id(
+                &format!("Can't find release for {}", path.display().path_styled())
+            )? {
+                Some(self.fetch_release_by_id(&discogs_release_id, console)?)
             } else {
-                let discogs_release_id = ask_discogs_release_id(
-                    &format!("Can't find release for {}", path.display().path_styled())
-                )?;
-                self.fetch_release_by_id(&discogs_release_id, console)?
+                None
             };
 
-            console_print!(console, "Will use {}", discogs_release.uri.as_str().path_styled());
+            if let Some(discogs_release) = &discogs_release {
+                console_print!(console, "Will use {}", discogs_release.uri.as_str().path_styled());
+            } else {
+                console_print!(console, "Will use file tags as is");
+            }
 
             result.push(MusicFilesToDiscogsRelease {
                 music_files,
@@ -301,9 +307,21 @@ impl DiscogsClient {
     }
 }
 
-fn ask_discogs_release_id(reason: &str) -> Result<String> {
-    Input::new()
-        .with_prompt(format!("{}. Please enter Discogs release ID", reason))
-        .interact_text()
-        .context("Failed to interact")
+fn ask_discogs_release_id(reason: &str) -> Result<Option<String>> {
+    let selected = Select::new()
+        .with_prompt(reason)
+        .default(0)
+        .item("Enter Discogs ID")
+        .item("Take as is")
+        .interact()?;
+
+    match selected {
+        0 => Input::new()
+            .with_prompt("Please enter Discogs release ID")
+            .interact_text()
+            .context("Failed to interact")
+            .map(Some),
+        1 => Ok(None),
+        _ => bail!("Unsupported option")
+    }
 }

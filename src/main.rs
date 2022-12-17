@@ -46,10 +46,10 @@ enum Command {
 
 #[derive(Args)]
 pub struct ImportArgs {
-    #[clap(long, parse(from_os_str))]
+    #[clap(long)]
     from: PathBuf,
 
-    #[clap(long, parse(from_os_str))]
+    #[clap(long)]
     to: PathBuf,
 
     #[clap(long)]
@@ -61,7 +61,7 @@ pub struct ImportArgs {
 
 #[derive(Args)]
 pub struct AddCoversArguments {
-    #[clap(long, parse(from_os_str))]
+    #[clap(long)]
     to: PathBuf,
 
     #[clap(long)]
@@ -70,7 +70,7 @@ pub struct AddCoversArguments {
 
 #[derive(Args)]
 pub struct FsyncArguments {
-    #[clap(parse(from_os_str))]
+    #[clap()]
     path: PathBuf,
 }
 

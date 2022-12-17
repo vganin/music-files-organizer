@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use console::Term;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Itertools;
@@ -49,8 +51,10 @@ impl Console {
     pub fn new_default_progress_bar(&mut self, len: u64) -> ProgressBar {
         let pb = ProgressBar::new(len);
         pb.set_style(
+            #[allow(clippy::unwrap_used)] // Ok to panic if template is invalid
             ProgressStyle::default_bar()
                 .template("{spinner:.red/yellow} [{elapsed_precise}] [{bar:50.red/yellow}] {bytes}/{total_bytes} {wide_msg}")
+                .unwrap()
                 .progress_chars(":: ")
                 .tick_strings(TICK_STRINGS)
         );
@@ -60,9 +64,11 @@ impl Console {
     pub fn new_default_spinner(&mut self) -> ProgressBar {
         let pb = ProgressBar::new(!0);
         pb.set_style(
+            #[allow(clippy::unwrap_used)] // Ok to panic if template is invalid
             ProgressStyle::default_bar()
                 .tick_strings(TICK_STRINGS)
                 .template("{spinner:.red/yellow} [{elapsed_precise}] {wide_msg}")
+                .unwrap()
         );
         self.configure_progress_bar(pb)
     }
@@ -75,8 +81,8 @@ impl Console {
     }
 }
 
-const PROGRESS_REFRESH_RATE: u64 = 15u64;
-const PROGRESS_TICK_MS: u64 = 80u64;
+const PROGRESS_REFRESH_RATE: u8 = 15u8;
+const PROGRESS_TICK_MS: Duration = Duration::from_millis(80u64);
 const TICK_STRINGS: &[&str] = &[
     "⠋",
     "⠙",

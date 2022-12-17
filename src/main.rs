@@ -52,10 +52,10 @@ pub struct ImportArgs {
     #[clap(long)]
     to: PathBuf,
 
-    #[clap(long)]
-    dont_clean_target_folders: bool,
+    #[clap(long, default_value_t = true)]
+    clean_target_folders: bool,
 
-    #[clap(long)]
+    #[clap(long, default_value_t = true)]
     clean_source_folders: bool,
 }
 

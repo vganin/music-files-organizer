@@ -518,9 +518,6 @@ fn find_cleanups(
     covers: &Vec<CoverChange>,
     args: &ImportArgs,
 ) -> Result<Vec<Cleanup>> {
-    let clean_targets = !args.dont_clean_target_folders;
-    let clean_sources = args.clean_source_folders;
-
     let mut result = HashSet::new();
 
     let mut source_folder_paths = HashSet::new();
@@ -538,7 +535,7 @@ fn find_cleanups(
         target_paths.insert(&change.path);
     }
 
-    if clean_targets {
+    if args.clean_target_folders {
         for target_folder_path in target_folder_paths {
             target_folder_path.read_dir()
                 .into_iter()
@@ -553,7 +550,7 @@ fn find_cleanups(
         }
     }
 
-    if clean_sources {
+    if args.clean_source_folders {
         for source_folder_path in source_folder_paths {
             source_folder_path.read_dir()
                 .into_iter()

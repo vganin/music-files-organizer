@@ -463,11 +463,8 @@ fn download_covers(
 }
 
 fn cleanup(cleanups: &[Cleanup]) -> Result<()> {
-    let mut parent_dirs = HashSet::new();
-
     for cleanup in cleanups {
         let path = &cleanup.path;
-        parent_dirs.insert(path.parent_or_empty());
         let metadata = fs::metadata(path)?;
         if metadata.is_dir() {
             fs::remove_dir_all(path)?;
@@ -476,15 +473,24 @@ fn cleanup(cleanups: &[Cleanup]) -> Result<()> {
         }
     }
 
-    for parent_dir in parent_dirs {
-        if Path::exists(parent_dir) && parent_dir.read_dir()?.next().is_none() && Confirm::new()
-            .with_prompt(format!("Directory {} is now empty. Do you wish to remove it?", parent_dir.display().path_styled()))
-            .default(true)
-            .show_default(true)
-            .wait_for_newline(true)
-            .interact()?
-        {
-            fs::remove_dir_all(parent_dir)?;
+    // Clean all empty parent dirs
+    for cleanup in cleanups {
+        let mut path: &Path = &cleanup.path;
+        while let Some(parent) = path.parent() {
+            if Path::exists(parent) &&
+                parent.read_dir()?.next().is_none() &&
+                Confirm::new()
+                    .with_prompt(format!("Directory {} is now empty. Do you wish to remove it?", parent.display().path_styled()))
+                    .default(true)
+                    .show_default(true)
+                    .wait_for_newline(true)
+                    .interact()?
+            {
+                fs::remove_dir_all(parent)?;
+                path = parent;
+            } else {
+                break;
+            }
         }
     }
 

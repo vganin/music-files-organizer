@@ -2,7 +2,6 @@ use std::time::Duration;
 
 use console::Term;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
-use itertools::Itertools;
 
 #[macro_export]
 macro_rules! console_print {
@@ -39,7 +38,7 @@ impl Console {
     }
 
     pub fn println(&self, str: &str) {
-        match self.pbs.iter().find_or_first(|pb| !pb.is_hidden() && !pb.is_finished()) {
+        match self.pbs.iter().find(|pb| !pb.is_hidden() && !pb.is_finished()) {
             Some(pb) => pb.println(str),
             None => {
                 #[allow(clippy::unwrap_used)]

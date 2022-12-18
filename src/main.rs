@@ -52,10 +52,10 @@ pub struct ImportArgs {
     #[clap(long)]
     to: PathBuf,
 
-    #[clap(long, default_value_t = true)]
+    #[clap(long, default_value_t = true, action = clap::ArgAction::Set)]
     clean_target_folders: bool,
 
-    #[clap(long, default_value_t = true)]
+    #[clap(long, default_value_t = true, action = clap::ArgAction::Set)]
     clean_source_folders: bool,
 }
 
@@ -64,7 +64,7 @@ pub struct AddCoversArguments {
     #[clap(long)]
     to: PathBuf,
 
-    #[clap(long)]
+    #[clap(long, default_value_t = false, action = clap::ArgAction::Set)]
     skip_if_present: bool,
 }
 

@@ -58,7 +58,7 @@ struct CoverChange {
     uri: String,
 }
 
-#[derive(Hash, PartialEq, Eq)]
+#[derive(Clone, Hash, PartialEq, Eq)]
 struct Cleanup {
     path: PathBuf,
 }
@@ -524,7 +524,7 @@ fn find_cleanups(
     covers: &Vec<CoverChange>,
     args: &ImportArgs,
 ) -> Result<Vec<Cleanup>> {
-    let mut result = HashSet::new();
+    let mut result = Vec::new();
 
     let mut source_folder_paths = HashSet::new();
     let mut target_folder_paths = HashSet::new();
@@ -550,7 +550,7 @@ fn find_cleanups(
                 .for_each(|entry| {
                     let path = entry.path();
                     if !target_paths.contains(&path) {
-                        result.insert(Cleanup { path });
+                        result.push(Cleanup { path });
                     }
                 });
         }
@@ -565,13 +565,13 @@ fn find_cleanups(
                 .for_each(|entry| {
                     let path = entry.path();
                     if !target_paths.contains(&path) {
-                        result.insert(Cleanup { path });
+                        result.push(Cleanup { path });
                     }
                 });
         }
     }
 
-    Ok(result.into_iter().collect())
+    Ok(result.into_iter().unique().collect_vec())
 }
 
 fn fsync(changes: &ChangeList, console: &mut Console) -> Result<()> {

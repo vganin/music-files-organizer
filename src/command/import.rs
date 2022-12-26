@@ -590,7 +590,7 @@ fn fsync(changes: &ChangeList, console: &mut Console) -> Result<()> {
 
 fn music_folder_path(tag: &dyn Tag) -> Result<PathBuf> {
     let context = |frame_id: FrameId| format!("No {} to form music folder name", frame_id);
-    let album_artist = tag.album_artist().or(tag.artist()).with_context(|| context(FrameId::AlbumArtist))?;
+    let album_artist = tag.album_artist().or_else(|| tag.artist()).with_context(|| context(FrameId::AlbumArtist))?;
     let year = tag.year().with_context(|| context(FrameId::Year))?;
     let album = tag.album().with_context(|| context(FrameId::Album))?;
 

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 pub struct DiscogsRelease {
     pub title: String,
     pub uri: String,
-    pub images: Vec<DiscogsImage>,
+    pub images: Option<Vec<DiscogsImage>>,
     #[serde(alias = "tracklist")] pub track_list: Vec<DiscogsTrack>,
     pub artists: Vec<DiscogsArtist>,
     pub year: i64,
@@ -58,8 +58,9 @@ impl DiscogsRelease {
     }
 
     pub fn best_image(&self) -> Option<&DiscogsImage> {
-        self.images.iter().find(|v| v.type_ == "primary")
-            .or_else(|| self.images.iter().find(|v| v.type_ == "secondary"))
+        let images = self.images.iter().flatten();
+        images.clone().find(|v| v.type_ == "primary")
+            .or_else(|| images.clone().find(|v| v.type_ == "secondary"))
     }
 }
 

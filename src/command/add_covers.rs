@@ -1,12 +1,10 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use itertools::Itertools;
 use reqwest::Url;
 use walkdir::WalkDir;
 
 use crate::{AddCoversArguments, Console, console_print, DiscogsClient, pb_finish_with_message, pb_set_message, tag};
-use crate::discogs::model::DiscogsRelease;
 use crate::util::console_styleable::ConsoleStyleable;
 use crate::util::path_extensions::PathExtensions;
 use crate::util::r#const::{COVER_EXTENSIONS, COVER_FILE_NAME_WITHOUT_EXTENSION};
@@ -46,7 +44,7 @@ pub fn add_covers(
 
     for directory in directories {
         let path = directory.path();
-        let discogs_image = WalkDir::new(path)
+        let first_tag = WalkDir::new(path)
             .contents_first(true)
             .max_depth(1)
             .into_iter()
@@ -57,23 +55,24 @@ pub fn add_covers(
                 let format = path.extension_or_empty();
                 tag::read_from_path(path, format)
             })
-            .map_ok(|tag| -> Result<Option<DiscogsRelease>> {
-                discogs_client.fetch_release_by_meta(
-                    &[tag.artist().context("No artist")?.to_string()],
-                    tag.album().context("No album")?,
-                    tag.title().context("No title")?,
-                    tag.total_tracks().map(|v| v as usize),
-                    console,
-                )
-            })
-            .flatten()
-            .filter_map_ok(|v| v)
-            .map_ok(|discogs_release| discogs_release.best_image().map(ToOwned::to_owned))
-            .filter_map_ok(|v| v)
             .next();
 
+        let Some(first_tag) = first_tag else {
+            // No valid tags in directory, skipping
+            continue;
+        };
+        let first_tag = first_tag?;
+
+        let discogs_image = discogs_client.fetch_release_by_meta(
+            &[first_tag.artist().context("No artist")?.to_string()],
+            first_tag.album().context("No album")?,
+            first_tag.title().context("No title")?,
+            first_tag.total_tracks().map(|v| v as usize),
+            console,
+        )?.and_then(|discogs_release| discogs_release.best_image().map(ToOwned::to_owned));
+
         if let Some(discogs_image) = discogs_image {
-            let cover_uri = &discogs_image?.resource_url;
+            let cover_uri = &discogs_image.resource_url;
             let cover_uri_as_file_path = PathBuf::from(Url::parse(cover_uri)?.path());
             let cover_extension = cover_uri_as_file_path.extension().context("Expected extension for cover")?;
             let cover_file_name = PathBuf::from(COVER_FILE_NAME_WITHOUT_EXTENSION).with_extension(cover_extension);
@@ -85,6 +84,8 @@ pub fn add_covers(
             discogs_client.download_cover(cover_uri, &cover_path, &pb, console)?;
 
             downloaded_covers_count += 1;
+        } else {
+            console_print!(console, "{}", format!("Failed to fetch cover for {}", path.display().path_styled()).error_styled());
         }
     }
 

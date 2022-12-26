@@ -139,7 +139,7 @@ impl Debug for dyn Tag {
 
 pub fn read_from_path(path: impl AsRef<Path>, format: &str) -> Option<Result<Box<dyn Tag>>> {
     let context = || format!("Invalid tags in file {}", path.as_ref().display().path_styled());
-    match format {
+    match format.to_lowercase().as_ref() {
         "mp3" => Some(::id3::Tag::read_from_path(&path).map(|v| Box::new(v) as Box<dyn Tag>).with_context(context)),
         "m4a" => Some(mp4ameta::Tag::read_from_path(&path).map(|v| Box::new(v) as Box<dyn Tag>).with_context(context)),
         "flac" => Some(metaflac::Tag::read_from_path(&path).map(|v| Box::new(v) as Box<dyn Tag>).with_context(context)),

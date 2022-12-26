@@ -89,7 +89,7 @@ impl DiscogsClient {
                 .collect();
 
             let discogs_release: Option<DiscogsRelease> = if let (Some(first_album), Some(first_track)) = (albums.first(), tracks.first()) {
-                if let Some(discogs_release) = self.fetch_release_by_meta(&artists, first_album, first_track, tracks.len(), console)? {
+                if let Some(discogs_release) = self.fetch_release_by_meta(&artists, first_album, first_track, Some(tracks.len()), console)? {
                     Some(discogs_release)
                 } else if let Some(discogs_release_id) = ask_discogs_release_id(
                     &format!(
@@ -152,7 +152,7 @@ impl DiscogsClient {
         artists: &[String],
         album: &str,
         track: &str,
-        track_count: usize,
+        track_count: Option<usize>,
         console: &Console,
     ) -> Result<Option<DiscogsRelease>> {
         console_print!(
@@ -176,14 +176,20 @@ impl DiscogsClient {
             .map_ok(|v| v)
             .flatten_ok();
 
-        for release_url in release_urls {
-            let release: DiscogsRelease = self.fetch_by_url(release_url?, console)?;
-            if release.valid_track_list().len() == track_count {
-                return Ok(Some(release));
+        if let Some(track_count) = track_count {
+            for release_url in release_urls {
+                let release: DiscogsRelease = self.fetch_by_url(release_url?, console)?;
+                if release.valid_track_list().len() == track_count {
+                    return Ok(Some(release));
+                }
             }
+            Ok(None)
+        } else if let Some(release_url) = release_urls.clone().next() {
+            let release: DiscogsRelease = self.fetch_by_url(release_url?, console)?;
+            Ok(Some(release))
+        } else {
+            Ok(None)
         }
-
-        Ok(None)
     }
 
     fn fetch_release_urls_from_master_search(

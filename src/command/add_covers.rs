@@ -62,7 +62,7 @@ pub fn add_covers(
                     &[tag.artist().context("No artist")?.to_string()],
                     tag.album().context("No album")?,
                     tag.title().context("No title")?,
-                    tag.total_tracks().context("No total tracks")? as usize,
+                    tag.total_tracks().map(|v| v as usize),
                     console,
                 )
             })

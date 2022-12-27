@@ -66,7 +66,6 @@ pub fn add_covers(
         let discogs_image = discogs_client.fetch_release_by_meta(
             &[first_tag.artist().context("No artist")?.to_string()],
             first_tag.album().context("No album")?,
-            first_tag.title().context("No title")?,
             first_tag.total_tracks().map(|v| v as usize),
             console,
         )?.and_then(|discogs_release| discogs_release.best_image().map(ToOwned::to_owned));

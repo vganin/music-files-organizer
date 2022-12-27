@@ -75,21 +75,21 @@ impl DiscogsClient {
         let mut result = Vec::new();
 
         for (path, music_files) in files_grouped_by_parent_path {
-            let artists: Vec<String> = music_files.iter()
+            let artists = music_files.iter()
                 .filter_map(|v| v.tag.artist().map(ToString::to_string))
                 .unique()
-                .collect();
-            let albums: Vec<String> = music_files.iter()
+                .collect_vec();
+            let albums = music_files.iter()
                 .filter_map(|v| v.tag.album().map(ToString::to_string))
                 .unique()
-                .collect();
-            let tracks: Vec<String> = music_files.iter()
+                .collect_vec();
+            let tracks = music_files.iter()
                 .filter_map(|v| v.tag.title().map(ToString::to_string))
                 .unique()
-                .collect();
+                .collect_vec();
 
-            let discogs_release: Option<DiscogsRelease> = if let (Some(first_album), Some(first_track)) = (albums.first(), tracks.first()) {
-                if let Some(discogs_release) = self.fetch_release_by_meta(&artists, first_album, first_track, Some(tracks.len()), console)? {
+            let discogs_release: Option<DiscogsRelease> = if let Some(first_album) = albums.first() {
+                if let Some(discogs_release) = self.fetch_release_by_meta(&artists, first_album, Some(tracks.len()), console)? {
                     Some(discogs_release)
                 } else if let Some(discogs_release_id) = ask_discogs_release_id(
                     &format!(
@@ -151,7 +151,6 @@ impl DiscogsClient {
         &self,
         artists: &[String],
         album: &str,
-        track: &str,
         track_count: Option<usize>,
         console: &Console,
     ) -> Result<Option<DiscogsRelease>> {
@@ -162,8 +161,8 @@ impl DiscogsClient {
             album.tag_styled(),
         );
 
-        let urls_from_master_search = || self.fetch_release_urls_from_master_search(artists, album, track, console);
-        let urls_from_release_search = || self.fetch_release_urls_from_release_search(artists, album, track, console);
+        let urls_from_master_search = || self.fetch_release_urls_from_master_search(artists, album, console);
+        let urls_from_release_search = || self.fetch_release_urls_from_release_search(artists, album, console);
 
         let fetch_funcs: [&dyn Fn() -> Result<Vec<String>>; 2] = [
             &urls_from_master_search,
@@ -196,7 +195,6 @@ impl DiscogsClient {
         &self,
         artists: &[String],
         album: &str,
-        track: &str,
         console: &Console,
     ) -> Result<Vec<String>> {
         let search_master_results = self.fetch_search_results(
@@ -204,7 +202,6 @@ impl DiscogsClient {
                 ("type", "master"),
                 ("artist", &artists.join(" ")),
                 ("release_title", album),
-                ("track", track),
             ],
             console,
         )?;
@@ -223,7 +220,6 @@ impl DiscogsClient {
         &self,
         artists: &[String],
         album: &str,
-        track: &str,
         console: &Console,
     ) -> Result<Vec<String>> {
         let search_variants = [
@@ -231,7 +227,6 @@ impl DiscogsClient {
                 ("type", "release".to_owned()),
                 ("artist", artists.join(" ")),
                 ("release_title", album.to_owned()),
-                ("track", track.to_owned()),
             ],
             vec![
                 ("type", "release".to_owned()),

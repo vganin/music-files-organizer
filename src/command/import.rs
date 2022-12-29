@@ -120,7 +120,9 @@ pub fn import(args: ImportArgs, discogs_client: &DiscogsClient, console: &mut Co
         write_music_files(&changes.music_files, console)?;
         download_covers(discogs_client, &changes.covers, console)?;
         cleanup(&changes.cleanups)?;
-        fsync(&changes, console)?;
+        if args.fsync {
+            fsync(&changes, console)?;
+        }
     }
 
     Ok(())

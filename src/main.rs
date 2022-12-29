@@ -57,6 +57,9 @@ pub struct ImportArgs {
 
     #[clap(long, default_value_t = true, action = clap::ArgAction::Set)]
     clean_source_folders: bool,
+
+    #[clap(long, default_value_t = true, action = clap::ArgAction::Set)]
+    fsync: bool,
 }
 
 #[derive(Args)]

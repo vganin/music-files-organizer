@@ -5,6 +5,7 @@ use dyn_clone::clone_box;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use itertools::Itertools;
+use unidecode::unidecode;
 
 use crate::discogs::model::{DiscogsRelease, DiscogsTrack};
 use crate::tag::Tag;
@@ -82,17 +83,33 @@ impl DiscogsRelease {
 
         let matcher = SkimMatcherV2::default();
         let pattern = original_tag.title()
-            .with_context(|| format!("Track contains no title: {:?}", original_tag))?;
+            .with_context(|| format!("Track contains no title: {:?}", original_tag))?
+            .simplify();
 
         for (track_index, track) in track_list.iter().enumerate() {
-            if matcher.fuzzy_match(&track.title, pattern).is_some() {
+            if matcher.fuzzy_match(&track.title.simplify(), &pattern).is_some() {
                 let position = &track.position;
                 let position = position.parse::<u32>().unwrap_or(track_index as u32 + 1);
                 return Ok((position, track));
             }
         }
 
-        bail!("Failed to find track {} from track list: {:?}", original_tag.title().unwrap_or("with no title"), track_list)
+        bail!(
+            "Failed to find track with '{}' and with {} from track list: {:?}",
+            original_tag.title().unwrap_or("no title"),
+            original_tag.track_number().map(|v| format!("position {}", v)).as_deref().unwrap_or("with no track number"),
+            track_list
+        )
+    }
+}
+
+trait StringExtension {
+    fn simplify(&self) -> String;
+}
+
+impl StringExtension for str {
+    fn simplify(&self) -> String {
+        unidecode(self).to_lowercase()
     }
 }
 

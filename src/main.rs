@@ -17,8 +17,7 @@ use clap::{Args, Parser, Subcommand};
 use crate::command::add_covers::add_covers;
 use crate::command::fsync::fsync;
 use crate::command::import::import;
-use crate::discogs::client::DiscogsClient;
-use crate::tag::Tag;
+use crate::discogs::matcher::DiscogsMatcher;
 use crate::util::console::Console;
 use crate::util::console_styleable::ConsoleStyleable;
 
@@ -26,6 +25,7 @@ mod tag;
 mod command;
 mod util;
 mod discogs;
+mod music_file;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -78,7 +78,7 @@ pub struct FsyncArguments {
 }
 
 fn main() -> ExitCode {
-    match main_with_result() {
+    match try_main() {
         Ok(_) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("{}", error.deref().error_styled());
@@ -89,7 +89,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn main_with_result() -> Result<()> {
+fn try_main() -> Result<()> {
     let cli = Cli::parse();
 
     let discogs_token = match cli.discogs_token {
@@ -101,21 +101,21 @@ fn main_with_result() -> Result<()> {
         }
     };
 
-    let discogs_client = DiscogsClient::new(&discogs_token)?;
+    let discogs_matcher = DiscogsMatcher::new(&discogs_token)?;
 
     let mut console = Console::new();
 
     match cli.command {
-        Command::Import(args) => import(args, &discogs_client, &mut console)?,
-        Command::AddCovers(args) => add_covers(args, &discogs_client, &mut console)?,
+        Command::Import(args) => import(args, &discogs_matcher, &mut console)?,
+        Command::AddCovers(args) => add_covers(args, &discogs_matcher, &mut console)?,
         Command::Fsync(args) => fsync(args, &mut console)?,
     }
 
     Ok(())
 }
 
-const DISCOGS_TOKEN_FILE_NAME: &str = ".discogs_token";
-
 fn get_discogs_token_file_path() -> Option<PathBuf> {
     Some(dirs::home_dir()?.join(DISCOGS_TOKEN_FILE_NAME))
 }
+
+const DISCOGS_TOKEN_FILE_NAME: &str = ".discogs_token";

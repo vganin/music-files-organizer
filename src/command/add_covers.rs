@@ -4,14 +4,18 @@ use anyhow::{Context, Result};
 use reqwest::Url;
 use walkdir::WalkDir;
 
-use crate::{AddCoversArguments, Console, console_print, DiscogsClient, pb_finish_with_message, pb_set_message, tag};
+use DiscogsReleaseMatchResult::{Matched, Unmatched};
+
+use crate::{AddCoversArguments, Console, console_print, DiscogsMatcher, pb_finish_with_message, pb_set_message};
+use crate::discogs::matcher::DiscogsReleaseMatchResult;
+use crate::music_file::MusicFile;
 use crate::util::console_styleable::ConsoleStyleable;
 use crate::util::path_extensions::PathExtensions;
 use crate::util::r#const::{COVER_EXTENSIONS, COVER_FILE_NAME_WITHOUT_EXTENSION};
 
 pub fn add_covers(
     args: AddCoversArguments,
-    discogs_client: &DiscogsClient,
+    discogs_matcher: &DiscogsMatcher,
     console: &mut Console,
 ) -> Result<()> {
     let root_path = args.to;
@@ -44,31 +48,29 @@ pub fn add_covers(
 
     for directory in directories {
         let path = directory.path();
-        let first_tag = WalkDir::new(path)
+        let first_music_file = WalkDir::new(path)
             .contents_first(true)
             .max_depth(1)
             .into_iter()
             .filter_map(Result::ok)
             .filter(|e| !e.file_type().is_dir())
-            .filter_map(|e| {
-                let path = e.path();
-                let format = path.extension_or_empty();
-                tag::read_from_path(path, format)
-            })
-            .next();
+            .map(|e| MusicFile::from_path(e.path()))
+            .next()
+            .map_or(Ok(None), |r| r.map(Some))?
+            .flatten();
 
-        let Some(first_tag) = first_tag else {
+        let Some(first_music_file) = first_music_file else {
             // No valid tags in directory, skipping
             continue;
         };
-        let first_tag = first_tag?;
 
-        let discogs_image = discogs_client.fetch_release_by_meta(
-            &[first_tag.artist().context("No artist")?.to_string()],
-            first_tag.album().context("No album")?,
-            first_tag.total_tracks().map(|v| v as usize),
-            console,
-        )?.and_then(|discogs_release| discogs_release.best_image().map(ToOwned::to_owned));
+        let discogs_image = discogs_matcher.match_music_files(&[first_music_file], console)?.first()
+            .and_then(|discogs_match_result| {
+                match discogs_match_result {
+                    Matched { release, .. } => release.best_image().map(ToOwned::to_owned),
+                    Unmatched(_) => None
+                }
+            });
 
         if let Some(discogs_image) = discogs_image {
             let cover_uri = &discogs_image.resource_url;
@@ -80,7 +82,7 @@ pub fn add_covers(
 
             pb_set_message!(pb, "Downloading cover to {}", display_path.path_styled());
 
-            discogs_client.download_cover(cover_uri, &cover_path, &pb, console)?;
+            discogs_matcher.download_cover(cover_uri, &cover_path, &pb, console)?;
 
             downloaded_covers_count += 1;
         } else {

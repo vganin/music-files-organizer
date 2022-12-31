@@ -133,7 +133,7 @@ impl DiscogsMatcher {
 
                 let release: DiscogsRelease = self.fetch_by_url(release_url, console)?;
                 let release_clone = release.clone();
-                match Self::match_release_with_music_files(release, &music_files) {
+                match Self::match_release_with_music_files_complex(release, &music_files) {
                     None => continue,
                     Some(tracks_matching) => {
                         match_result = Matched { tracks_matching, release: release_clone };
@@ -150,7 +150,7 @@ impl DiscogsMatcher {
                     loop {
                         let release = self.fetch_release_by_id(&release_id, console)?;
                         let release_clone = release.clone();
-                        match Self::match_release_with_music_files(release, &music_files) {
+                        match Self::match_release_with_music_files_simple(release, &music_files) {
                             None => {
                                 match Self::ask_for_release_id(
                                     &format!("Failed to match with ID {}", release_id).error_styled().to_string())?
@@ -202,10 +202,10 @@ impl DiscogsMatcher {
         Ok(())
     }
 
-    fn match_release_with_music_files<'a: 'b, 'b>(
+    fn match_release_with_music_files_complex<'a>(
         release: DiscogsRelease,
         music_files: &Vec<&'a MusicFile>,
-    ) -> Option<Vec<DiscogsTrackMatch<'b>>> {
+    ) -> Option<Vec<DiscogsTrackMatch<'a>>> {
         let track_list = release.valid_track_list();
 
         if track_list.is_empty() {
@@ -221,6 +221,30 @@ impl DiscogsMatcher {
                 let title_matched = || track_title.is_similar(&track.title);
                 let position_matched = || tag.track_number().map(|v| &((v - 1) as usize) == index).unwrap_or(true);
                 title_matched() && position_matched()
+            }) else { return None; };
+
+            tracks_matching.push(DiscogsTrackMatch {
+                music_file,
+                track: track.deref().clone(),
+                position: (index + 1) as u32,
+            })
+        }
+
+        Some(tracks_matching)
+    }
+
+    fn match_release_with_music_files_simple<'a>(
+        release: DiscogsRelease,
+        music_files: &Vec<&'a MusicFile>,
+    ) -> Option<Vec<DiscogsTrackMatch<'a>>> {
+        let track_list = release.valid_track_list();
+
+        let mut tracks_matching: Vec<DiscogsTrackMatch> = vec![];
+
+        for music_file in music_files {
+            let tag = &music_file.tag;
+            let Some((index, track)) = track_list.iter().enumerate().find(|(index, _)| {
+                tag.track_number().map(|v| &((v - 1) as usize) == index).unwrap_or(true)
             }) else { return None; };
 
             tracks_matching.push(DiscogsTrackMatch {

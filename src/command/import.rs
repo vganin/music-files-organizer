@@ -300,7 +300,7 @@ fn edit_changes<'a>(
     args: &ImportArgs,
 ) -> Result<ChangeList<'a>> {
     const TRACK_DELIMITER: &str = "--------------------------";
-    let line_pattern: Regex = Regex::new(r"^(.+): (.*)$")?;
+    let line_pattern: Regex = Regex::new(r"^(.+?): (.*)$")?;
     let mut editor_prompt = String::new();
 
     for music_file in &changes.music_files {

@@ -9,7 +9,7 @@ pub struct DiscogsRelease {
     #[serde(alias = "tracklist")] pub track_list: Vec<DiscogsTrack>,
     pub artists: Vec<DiscogsArtist>,
     pub year: i64,
-    pub styles: Vec<String>,
+    pub styles: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

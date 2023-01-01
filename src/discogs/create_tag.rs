@@ -64,7 +64,7 @@ pub fn create_tag_from_discogs_data(
     new_tag.set_year(Some(discogs_release.year as i32));
     new_tag.set_track_number(Some(position));
     new_tag.set_total_tracks(Some(discogs_release.valid_track_list().len() as u32));
-    new_tag.set_genre(Some(discogs_release.styles.join("; ")));
+    new_tag.set_genre(Some(discogs_release.styles.as_deref().unwrap_or_default().join("; ")));
     new_tag.set_custom_text(DISCOGS_RELEASE_TAG.to_owned(), Some(discogs_release.uri.to_owned()));
 
     Ok(new_tag)

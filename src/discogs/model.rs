@@ -1,3 +1,6 @@
+use std::iter;
+
+use itertools::Itertools;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
@@ -24,6 +27,7 @@ pub struct DiscogsTrack {
     pub type_: String,
     pub artists: Option<Vec<DiscogsArtist>>,
     pub position: Option<String>,
+    pub sub_tracks: Option<Vec<DiscogsTrack>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -54,7 +58,18 @@ impl DiscogsRelease {
     }
 
     pub fn valid_track_list(&self) -> Vec<&DiscogsTrack> {
-        self.track_list.iter().filter(|v| v.type_ == "track").collect()
+        Self::_valid_track_list(&self.track_list).collect_vec()
+    }
+
+    fn _valid_track_list<'a, It>(track_iterator: It) -> Box<dyn Iterator<Item=&'a DiscogsTrack> + 'a>
+        where It: IntoIterator<Item=&'a DiscogsTrack> + 'a,
+    {
+        Box::new(
+            track_iterator
+                .into_iter()
+                .flat_map(|v| iter::once(v).chain(Self::_valid_track_list(v.sub_tracks.iter().flatten())))
+                .filter(|v| v.type_ == "track")
+        )
     }
 
     pub fn best_image(&self) -> Option<&DiscogsImage> {

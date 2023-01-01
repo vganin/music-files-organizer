@@ -10,6 +10,7 @@ use dialoguer::{Input, Select};
 use indicatif::ProgressBar;
 use itertools::Itertools;
 use progress_streams::ProgressWriter;
+use regex::Regex;
 use reqwest::{blocking, IntoUrl, StatusCode, Url};
 use reqwest::blocking::Response;
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
@@ -371,7 +372,7 @@ impl DiscogsMatcher {
 
     fn ask_for_release_id(reason: &str) -> Result<Option<String>> {
         let selected = Select::new()
-            .with_prompt(reason.styled().bold().to_string())
+            .with_prompt(reason.styled().yellow().to_string())
             .default(0)
             .item("Enter Discogs ID")
             .item("Take as is")
@@ -382,6 +383,18 @@ impl DiscogsMatcher {
                 .with_prompt("Please enter Discogs release ID".styled().bold().to_string())
                 .interact_text()
                 .context("Failed to interact")
+                .and_then(|v: String| {
+                    #[allow(clippy::unwrap_used)]
+                        let regex1 = Regex::new(r"^\[r([0-9]+)\]$").unwrap();
+                    #[allow(clippy::unwrap_used)]
+                        let regex2 = Regex::new(r"^([0-9]+)$").unwrap();
+
+                    #[allow(clippy::unwrap_used)]
+                    match regex1.captures(&v).or_else(|| regex2.captures(&v)) {
+                        None => bail!("Invalid Discogs release ID: {}", v),
+                        Some(captures) => Ok(captures.get(1).unwrap().as_str().to_owned())
+                    }
+                })
                 .map(Some),
             1 => Ok(None),
             _ => bail!("Unsupported option")

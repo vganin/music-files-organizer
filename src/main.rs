@@ -46,8 +46,8 @@ enum Command {
 
 #[derive(Args)]
 pub struct ImportArgs {
-    #[clap(long)]
-    from: PathBuf,
+    #[clap(long, num_args = 1..)]
+    from: Vec<PathBuf>,
 
     #[clap(long)]
     to: PathBuf,

@@ -114,10 +114,11 @@ pub fn import(args: ImportArgs, discogs_matcher: &DiscogsMatcher, console: &mut 
     Ok(())
 }
 
-fn get_music_files(path: impl AsRef<Path>, console: &mut Console) -> Result<Vec<MusicFile>> {
+fn get_music_files(paths: &[impl AsRef<Path>], console: &mut Console) -> Result<Vec<MusicFile>> {
     let pb = console.new_default_spinner();
 
-    let files: Vec<_> = WalkDir::new(path).into_iter()
+    let files: Vec<_> = paths.iter()
+        .flat_map(|path| WalkDir::new(path).into_iter())
         .filter_map(Result::ok)
         .filter(|e| !e.file_type().is_dir())
         .collect();

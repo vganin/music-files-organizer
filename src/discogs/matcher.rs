@@ -113,6 +113,7 @@ impl DiscogsMatcher {
                 .flat_map(|params| {
                     self.search_master_release(params, console)
                         .chain(self.search_release(params, console))
+                        .take(5) // No more than 5 release fetches per params combinations to give other combinations realistic chances
                 });
 
             let mut match_result: DiscogsReleaseMatchResult = DiscogsReleaseMatchResult::Unmatched(music_files.clone());

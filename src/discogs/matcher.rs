@@ -1,9 +1,11 @@
-use std::{f64, thread, time};
+use std::{f64, thread};
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
+use std::mem::swap;
 use std::ops::Deref;
 use std::path::Path;
+use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use dialoguer::{Input, Select};
@@ -105,18 +107,10 @@ impl DiscogsMatcher {
                     .tag_styled(),
             );
 
-            // Construct lazy search iterator in order from most specific to least specific to minimize search requests, e.g.
-            // - search master (burzum, filosofem, 1996)
-            // - search release (burzum, filosofem, 1996)
-            // - search master (burzum, filosofem)
-            // - search release (burzum, filosofem)
-            // - search master (burzum)
-            // - search release (burzum)
-            // - failed to find anything
             let common_search_params = Self::common_search_params_from_music_files(&music_files);
-            let release_urls = (1..common_search_params.len()).rev()
-                .flat_map(|last_index| {
-                    let params = &common_search_params[..last_index];
+            let release_urls = common_search_params
+                .iter()
+                .flat_map(|params| {
                     self.search_master_release(params, console)
                         .chain(self.search_release(params, console))
                 });
@@ -220,8 +214,15 @@ impl DiscogsMatcher {
             let track_title = tag.title().or_else(|| music_file.file_path.file_stem().and_then(|v| v.to_str())).unwrap_or_default();
             let Some((index, track)) = track_list.iter().enumerate().find(|(index, track)| {
                 let title_matched = || track_title.is_similar(&track.title);
+                let duration_matched = || {
+                    const DURATION_DIFF_THRESHOLD: Duration = Duration::from_secs(90);
+                    let Some(mut duration1) = music_file.duration else { return false; };
+                    let Ok(Some(mut duration2)) = track.parsed_duration() else { return false; };
+                    if duration2 < duration1 { swap(&mut duration1, &mut duration2); };
+                    duration2 - duration1 < DURATION_DIFF_THRESHOLD
+                };
                 let position_matched = || tag.track_number().map(|v| &((v - 1) as usize) == index).unwrap_or(true);
-                title_matched() && position_matched()
+                (title_matched() || duration_matched()) && position_matched()
             }) else { return None; };
 
             tracks_matching.push(DiscogsTrackMatch {
@@ -284,33 +285,47 @@ impl DiscogsMatcher {
             .map_ok(|v| v.resource_url)
     }
 
-    fn common_search_params_from_music_files(music_files: &[&MusicFile]) -> Vec<(&'static str, String)> {
-        // Sorted in order of specificity
+    fn common_search_params_from_music_files(music_files: &[&MusicFile]) -> Vec<Vec<(&'static str, String)>> {
+        let artist = (
+            "artist",
+            music_files
+                .iter()
+                .filter_map(|v| v.tag.artist().map(StringExtensions::simplify))
+                .unique()
+                .join(" ")
+        );
+        let album = (
+            "release_title",
+            music_files
+                .iter()
+                .filter_map(|v| v.tag.album().map(StringExtensions::simplify))
+                .unique()
+                .join(" ")
+        );
+        let year = (
+            "year",
+            music_files
+                .iter()
+                .filter_map(|v| v.tag.year().map(|v| v.to_string()))
+                .unique()
+                .join(" ")
+        );
         vec![
-            (
-                "artist",
-                music_files
-                    .iter()
-                    .filter_map(|v| v.tag.artist().map(StringExtensions::simplify))
-                    .unique()
-                    .join(" ")
-            ),
-            (
-                "release_title",
-                music_files
-                    .iter()
-                    .filter_map(|v| v.tag.album().map(StringExtensions::simplify))
-                    .unique()
-                    .join(" ")
-            ),
-            (
-                "year",
-                music_files
-                    .iter()
-                    .filter_map(|v| v.tag.year().map(|v| v.to_string()))
-                    .unique()
-                    .join(" ")
-            ),
+            vec![
+                album.clone(),
+            ],
+            vec![
+                artist.clone(),
+                album.clone(),
+                year.clone(),
+            ],
+            vec![
+                artist.clone(),
+                album.clone(),
+            ],
+            vec![
+                artist.clone(),
+            ],
         ]
     }
 
@@ -363,7 +378,7 @@ impl DiscogsMatcher {
                 let rate_limit = header_as_number("X-Discogs-Ratelimit")?;
                 let rate_limit_used = header_as_number("X-Discogs-Ratelimit-Used")?;
                 let skip = f64::min(rate_limit_used - rate_limit, 0f64) + 1f64;
-                thread::sleep(time::Duration::from_secs_f64(skip * 60f64 / rate_limit));
+                thread::sleep(Duration::from_secs_f64(skip * 60f64 / rate_limit));
             } else {
                 bail!("Expected successful status code but got {}", status)
             }

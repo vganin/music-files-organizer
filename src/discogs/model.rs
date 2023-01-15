@@ -1,5 +1,7 @@
 use std::iter;
+use std::time::Duration;
 
+use anyhow::Result;
 use itertools::Itertools;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -23,11 +25,12 @@ pub struct DiscogsMaster {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DiscogsTrack {
     pub title: String,
-    // It's literally "type_" in format
     pub type_: String,
+    // It's literally "type_" in format
     pub artists: Option<Vec<DiscogsArtist>>,
     pub position: Option<String>,
     pub sub_tracks: Option<Vec<DiscogsTrack>>,
+    pub duration: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -82,6 +85,21 @@ impl DiscogsRelease {
 impl DiscogsTrack {
     pub fn proper_title(&self) -> &str {
         self.title.trim()
+    }
+
+    pub fn parsed_duration(&self) -> Result<Option<Duration>> {
+        self.duration.as_ref()
+            .map(|v| -> Result<_> {
+                let parts = v.split(':').rev().collect::<Vec<_>>();
+                let mut seconds = 0u64;
+                let mut multiplier = 1u64;
+                for part in parts {
+                    seconds += part.parse::<u64>()? * multiplier;
+                    multiplier *= 60
+                }
+                Ok(Duration::from_secs(seconds))
+            })
+            .map_or(Ok(None), |v| v.map(Some))
     }
 }
 

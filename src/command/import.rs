@@ -171,7 +171,7 @@ fn calculate_changes<'a>(
 
             let music_file_change = MusicFileChange {
                 source: music_file,
-                target: MusicFile::from_tag(target_tag, &args.to, transcode_to_mp4, source_extension)?,
+                target: MusicFile::from_tag(target_tag, &args.to, transcode_to_mp4, source_extension, music_file.duration)?,
                 transcode_to_mp4,
                 source_file_len: bytes_to_transfer,
                 discogs_release: discogs_info.map(|v| v.2),
@@ -358,6 +358,7 @@ fn edit_changes<'a>(
                     &args.to,
                     music_file.transcode_to_mp4,
                     music_file.source.file_path.extension_or_empty(),
+                    music_file.source.duration,
                 )?,
                 ..music_file
             })

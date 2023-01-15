@@ -5,3 +5,4 @@ pub mod path_extensions;
 pub mod console_styleable;
 pub mod fsync;
 pub mod string_extensions;
+pub mod audio_file_duration;

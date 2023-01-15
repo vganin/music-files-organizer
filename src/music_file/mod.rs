@@ -1,5 +1,6 @@
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::Context;
 use anyhow::Result;
@@ -8,11 +9,13 @@ use sanitize_filename::sanitize_with_options;
 use crate::tag;
 use crate::tag::frame::FrameId;
 use crate::tag::Tag;
+use crate::util::audio_file_duration::from_path;
 use crate::util::path_extensions::PathExtensions;
 
 pub struct MusicFile {
     pub file_path: PathBuf,
     pub tag: Box<dyn Tag>,
+    pub duration: Option<Duration>,
 }
 
 impl MusicFile {
@@ -21,19 +24,21 @@ impl MusicFile {
             Ok(Some(MusicFile {
                 file_path: PathBuf::from(path),
                 tag,
+                duration: from_path(path)?,
             }))
         } else {
             Ok(None)
         }
     }
 
-    pub fn from_tag(tag: Box<dyn Tag>, base_path: &Path, transcode_to_mp4: bool, source_extension: &str) -> Result<Self> {
+    pub fn from_tag(tag: Box<dyn Tag>, base_path: &Path, transcode_to_mp4: bool, source_extension: &str, duration: Option<Duration>) -> Result<Self> {
         let target_folder_path = base_path.join(music_folder_path(tag.deref())?);
         let target_extension = if transcode_to_mp4 { "m4a" } else { source_extension };
         let target_path = target_folder_path.join(music_file_name(tag.deref(), target_extension)?);
         Ok(MusicFile {
             file_path: target_path,
             tag,
+            duration,
         })
     }
 }

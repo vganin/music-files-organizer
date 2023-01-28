@@ -314,6 +314,10 @@ impl DiscogsMatcher {
         vec![
             vec![
                 album.clone(),
+                year.clone(),
+            ],
+            vec![
+                album.clone(),
             ],
             vec![
                 artist.clone(),

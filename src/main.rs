@@ -60,6 +60,9 @@ pub struct ImportArgs {
 
     #[clap(long, default_value_t = true, action = clap::ArgAction::Set)]
     fsync: bool,
+
+    #[clap(long)]
+    chunk_size: Option<usize>
 }
 
 #[derive(Args)]

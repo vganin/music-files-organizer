@@ -78,7 +78,7 @@ pub enum DiscogsReleaseMatchResult<'a> {
 impl DiscogsMatcher {
     pub fn match_music_files<'a>(
         &self,
-        music_files: &'a [MusicFile],
+        music_files: impl Iterator<Item=&'a MusicFile>,
         console: &Console,
     ) -> Result<Vec<DiscogsReleaseMatchResult<'a>>> {
         let mut files_grouped_by_parent_path: HashMap<&Path, Vec<&MusicFile>> = HashMap::new();

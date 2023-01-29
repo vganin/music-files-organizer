@@ -64,7 +64,7 @@ pub fn add_covers(
             continue;
         };
 
-        let discogs_image = discogs_matcher.match_music_files(&[first_music_file], console)?.first()
+        let discogs_image = discogs_matcher.match_music_files([first_music_file].iter(), console)?.first()
             .and_then(|discogs_match_result| {
                 match discogs_match_result {
                     Matched { release, .. } => release.best_image().map(ToOwned::to_owned),

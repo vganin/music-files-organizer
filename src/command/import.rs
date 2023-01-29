@@ -60,84 +60,103 @@ pub fn import(args: ImportArgs, discogs_matcher: &DiscogsMatcher, console: &mut 
         bail!("Output path is not a directory")
     }
 
-    let music_files = get_music_files(&args.from, console)?;
-    let discogs_releases = discogs_matcher.match_music_files(&music_files, console)?;
+    let music_files_chunks = get_music_files_chunks(&args);
 
-    let mut changes = calculate_changes(&discogs_releases, &args)?;
+    for music_files in music_files_chunks {
+        let music_files = music_files?;
+        let discogs_releases = discogs_matcher.match_music_files(music_files.iter(), console)?;
 
-    if changes.music_files.is_empty() && changes.covers.is_empty() {
-        console_print!(console, "{}", "Nothing to do, all good".styled().green());
-        return Ok(());
-    }
+        let mut changes = calculate_changes(&discogs_releases, &args)?;
 
-    loop {
-        if Confirm::new()
-            .with_prompt("Do you want to review changes?")
-            .default(false)
-            .show_default(true)
-            .wait_for_newline(true)
-            .interact()?
-        {
-            print_changes_details(&changes, console);
+        if changes.music_files.is_empty() && changes.covers.is_empty() {
+            continue;
+        }
 
+        loop {
             if Confirm::new()
-                .with_prompt("Do you want to edit changes?")
+                .with_prompt("Do you want to review changes?")
                 .default(false)
                 .show_default(true)
                 .wait_for_newline(true)
                 .interact()?
             {
-                changes = edit_changes(changes, &args)?;
+                print_changes_details(&changes, console);
+
+                if Confirm::new()
+                    .with_prompt("Do you want to edit changes?")
+                    .default(false)
+                    .show_default(true)
+                    .wait_for_newline(true)
+                    .interact()?
+                {
+                    changes = edit_changes(changes, &args)?;
+                } else {
+                    break;
+                }
             } else {
                 break;
             }
-        } else {
-            break;
         }
-    }
 
-    if Confirm::new()
-        .with_prompt("Do you want to make changes?")
-        .default(true)
-        .show_default(true)
-        .wait_for_newline(true)
-        .interact()?
-    {
-        write_music_files(&changes.music_files, console)?;
-        download_covers(discogs_matcher, &changes.covers, console)?;
-        cleanup(&changes.cleanups)?;
-        if args.fsync {
-            fsync(&changes, console)?;
+        if Confirm::new()
+            .with_prompt("Do you want to make changes?")
+            .default(true)
+            .show_default(true)
+            .wait_for_newline(true)
+            .interact()?
+        {
+            write_music_files(&changes.music_files, console)?;
+            download_covers(discogs_matcher, &changes.covers, console)?;
+            cleanup(&changes.cleanups)?;
+            if args.fsync {
+                fsync(&changes, console)?;
+            }
         }
     }
 
     Ok(())
 }
 
-fn get_music_files(paths: &[impl AsRef<Path>], console: &mut Console) -> Result<Vec<MusicFile>> {
-    let pb = console.new_default_spinner();
-
-    let files: Vec<_> = paths.iter()
-        .flat_map(|path| WalkDir::new(path).into_iter())
-        .filter_map(Result::ok)
-        .filter(|e| !e.file_type().is_dir())
-        .collect();
-
-    let mut music_files = vec![];
-
-    for file in files {
-        let path = file.path();
-
-        pb_set_message!(pb, "Analyzing {}", path.display().path_styled());
-
-        if let Some(music_file) = MusicFile::from_path(path)? {
-            music_files.push(music_file);
-        }
-    }
-
-    pb.finish_and_clear();
-
-    Ok(music_files)
+fn get_music_files_chunks(args: &ImportArgs) -> impl Iterator<Item=Result<Vec<MusicFile>>> {
+    args.from
+        .iter()
+        .map(|path| -> Result<_> {
+            Ok(
+                if fs::metadata(path)?.is_dir() {
+                    WalkDir::new(path)
+                        .min_depth(1)
+                        .into_iter()
+                        .filter_ok(|e| e.file_type().is_dir())
+                        .collect_vec()
+                } else {
+                    WalkDir::new(path)
+                        .into_iter()
+                        .collect_vec()
+                }
+            )
+        })
+        .flatten_ok()
+        .flatten_ok()
+        .chunks(args.chunk_size.unwrap_or(usize::MAX))
+        .into_iter()
+        .map(|chunk| chunk.collect_vec())
+        .collect_vec()
+        .into_iter()
+        .flatten()
+        .map_ok(move |e| {
+            WalkDir::new(e.path())
+                .max_depth(1)
+                .into_iter()
+                .filter_map(Result::ok)
+                .filter(|e| !e.file_type().is_dir())
+                .map(|file| {
+                    let path = file.path();
+                    MusicFile::from_path(path)
+                })
+                .flatten_ok()
+                .try_collect::<MusicFile, Vec<MusicFile>, _>()
+        })
+        .flatten_ok()
 }
 
 fn calculate_changes<'a>(

@@ -137,26 +137,26 @@ fn get_music_files_chunks(args: &ImportArgs) -> impl Iterator<Item=Result<Vec<Mu
         })
         .flatten_ok()
         .flatten_ok()
+        .filter_map(Result::ok)
         .chunks(args.chunk_size.unwrap_or(usize::MAX))
         .into_iter()
         .map(|chunk| chunk.collect_vec())
         .collect_vec()
         .into_iter()
-        .flatten()
-        .map_ok(move |e| {
-            WalkDir::new(e.path())
-                .max_depth(1)
+        .map(move |chunk| {
+            chunk
                 .into_iter()
-                .filter_map(Result::ok)
-                .filter(|e| !e.file_type().is_dir())
-                .map(|file| {
-                    let path = file.path();
-                    MusicFile::from_path(path)
+                .flat_map(|e| {
+                    WalkDir::new(e.path())
+                        .max_depth(1)
+                        .into_iter()
+                        .filter_map(Result::ok)
                 })
+                .filter(|e| !e.file_type().is_dir())
+                .map(|file| MusicFile::from_path(file.path()))
                 .flatten_ok()
                 .try_collect::<MusicFile, Vec<MusicFile>, _>()
         })
-        .flatten_ok()
 }
 
 fn calculate_changes<'a>(

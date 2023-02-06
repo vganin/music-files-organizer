@@ -124,7 +124,6 @@ fn get_music_files_chunks(args: &ImportArgs) -> impl Iterator<Item=Result<Vec<Mu
             Ok(
                 if fs::metadata(path)?.is_dir() {
                     WalkDir::new(path)
-                        .min_depth(1)
                         .into_iter()
                         .filter_ok(|e| e.file_type().is_dir())
                         .collect_vec()

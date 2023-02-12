@@ -4,28 +4,28 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = { version = "1.0", features = ["backtrace"] }
-clap = { version = "4.1.1", features = ["derive"] }
-id3 = "1.0.2"
-mp4ameta = "0.11.0"
-metaflac = "0.2.5"
-ffmpeg-next = { version = "5.1.1", features = ["build-lib-fdk-aac"] }
-reqwest = { version = "0.11", features = ["blocking", "json"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "^1"
-common-path = "1.0.0"
-console = "0.15.0"
-indicatif = "0.17.2"
-dialoguer = "0.10.0"
-regex = "1.5.5"
-sanitize-filename = "0.4.0"
-dirs = "4.0.0"
-progress-streams = "1.1.0"
-tempfile = "3"
-itertools = "0.10.2"
-dyn-clone = "1.0.5"
-walkdir = "2.3.2"
-unidecode = "0.3.0"
-strsim = "0.10.0"
+anyhow = { version = "*", features = ["backtrace"] }
+clap = { version = "*", features = ["derive"] }
+id3 = "*"
+mp4ameta = "*"
+metaflac = "*"
+ffmpeg-next = { version = "*", features = ["build-lib-fdk-aac"] }
+reqwest = { version = "*", features = ["blocking", "json"] }
+serde = { version = "*", features = ["derive"] }
+serde_json = "*"
+common-path = "*"
+console = "*"
+indicatif = "*"
+dialoguer = "*"
+regex = "*"
+sanitize-filename = "*"
+dirs = "*"
+progress-streams = "*"
+tempfile = "*"
+itertools = "*"
+dyn-clone = "*"
+walkdir = "*"
+unidecode = "*"
+strsim = "*"
 fuzzy-matcher = "*"
-mp3-duration = "0.1.10"
+mp3-duration = "*"

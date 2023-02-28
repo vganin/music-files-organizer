@@ -21,7 +21,8 @@ use serde::de::DeserializeOwned;
 use DiscogsReleaseMatchResult::Matched;
 
 use crate::console_print;
-use crate::discogs::model::{DiscogsMaster, DiscogsRelease, DiscogsSearchResultPage, DiscogsTrack};
+use crate::discogs::model::refined;
+use crate::discogs::model::serialized;
 use crate::music_file::MusicFile;
 use crate::util::console::Console;
 use crate::util::console_styleable::ConsoleStyleable;
@@ -63,14 +64,13 @@ impl DiscogsMatcher {
 
 pub struct DiscogsTrackMatch<'a> {
     pub music_file: &'a MusicFile,
-    pub track: DiscogsTrack,
-    pub position: u32,
+    pub track: refined::DiscogsTrack,
 }
 
 pub enum DiscogsReleaseMatchResult<'a> {
     Matched {
         tracks_matching: Vec<DiscogsTrackMatch<'a>>,
-        release: DiscogsRelease,
+        release: refined::DiscogsRelease,
     },
     Unmatched(Vec<&'a MusicFile>),
 }
@@ -127,12 +127,14 @@ impl DiscogsMatcher {
                     checked_release_urls.insert(release_url.clone());
                 }
 
-                let release: DiscogsRelease = self.fetch_by_url(release_url, console)?;
-                let release_clone = release.clone();
-                match Self::match_release_with_music_files_complex(release, &music_files) {
+                let serialized_release: serialized::DiscogsRelease = self.fetch_by_url(release_url, console)?;
+                let refined_release = refined::DiscogsRelease::from(&serialized_release)?;
+
+                // FIXME: clone() is redundant here
+                match Self::match_release_with_music_files_complex(refined_release.clone(), &music_files) {
                     None => continue,
                     Some(tracks_matching) => {
-                        match_result = Matched { tracks_matching, release: release_clone };
+                        match_result = Matched { tracks_matching, release: refined_release };
                         break;
                     }
                 }
@@ -144,9 +146,11 @@ impl DiscogsMatcher {
                 {
                     let mut release_id = release_id;
                     loop {
-                        let release = self.fetch_release_by_id(&release_id, console)?;
-                        let release_clone = release.clone();
-                        match Self::match_release_with_music_files_simple(release, &music_files) {
+                        let serialized_release = self.fetch_release_by_id(&release_id, console)?;
+                        let refined_release = refined::DiscogsRelease::from(&serialized_release)?;
+
+                        // FIXME: clone() is redundant here
+                        match Self::match_release_with_music_files_simple(refined_release.clone(), &music_files) {
                             None => {
                                 match Self::ask_for_release_id(
                                     &format!("Failed to match with ID {}", release_id).error_styled().to_string())?
@@ -156,7 +160,7 @@ impl DiscogsMatcher {
                                 }
                             }
                             Some(tracks_matching) => {
-                                match_result = Matched { tracks_matching, release: release_clone };
+                                match_result = Matched { tracks_matching, release: refined_release };
                                 break;
                             }
                         }
@@ -199,10 +203,10 @@ impl DiscogsMatcher {
     }
 
     fn match_release_with_music_files_complex<'a>(
-        release: DiscogsRelease,
+        release: refined::DiscogsRelease,
         music_files: &Vec<&'a MusicFile>,
     ) -> Option<Vec<DiscogsTrackMatch<'a>>> {
-        let track_list = release.valid_track_list();
+        let track_list = release.tracks;
 
         if track_list.is_empty() {
             return None;
@@ -213,23 +217,21 @@ impl DiscogsMatcher {
         for music_file in music_files {
             let tag = &music_file.tag;
             let track_title = tag.title().or_else(|| music_file.file_path.file_stem().and_then(|v| v.to_str())).unwrap_or_default();
-            let Some((index, track)) = track_list.iter().enumerate().find(|(index, track)| {
+            let Some(track) = track_list.iter().find(|track| {
                 let title_matched = || track_title.is_similar(&track.title);
                 let duration_matched = || {
                     const DURATION_DIFF_THRESHOLD: Duration = Duration::from_secs(90);
                     let Some(mut duration1) = music_file.duration else { return false; };
-                    let Ok(Some(mut duration2)) = track.parsed_duration() else { return false; };
+                    let Some(mut duration2) = track.duration else { return false; };
                     if duration2 < duration1 { swap(&mut duration1, &mut duration2); };
                     duration2 - duration1 < DURATION_DIFF_THRESHOLD
                 };
-                let position_matched = || tag.track_number().map(|v| &((v - 1) as usize) == index).unwrap_or(true);
-                (title_matched() || duration_matched()) && position_matched()
+                title_matched() && duration_matched()
             }) else { return None; };
 
             tracks_matching.push(DiscogsTrackMatch {
                 music_file,
                 track: track.deref().clone(),
-                position: (index + 1) as u32,
             })
         }
 
@@ -237,23 +239,24 @@ impl DiscogsMatcher {
     }
 
     fn match_release_with_music_files_simple<'a>(
-        release: DiscogsRelease,
+        release: refined::DiscogsRelease,
         music_files: &Vec<&'a MusicFile>,
     ) -> Option<Vec<DiscogsTrackMatch<'a>>> {
-        let track_list = release.valid_track_list();
+        let track_list = release.tracks;
 
         let mut tracks_matching: Vec<DiscogsTrackMatch> = vec![];
 
         for music_file in music_files {
             let tag = &music_file.tag;
-            let Some((index, track)) = track_list.iter().enumerate().find(|(index, _)| {
-                tag.track_number().map(|v| &((v - 1) as usize) == index).unwrap_or(true)
-            }) else { return None; };
+            let Some(track) = track_list.iter().find(|track| {
+                tag.disc().unwrap_or(1) == track.disc && tag.track_number() == Some(track.position)
+            }) else {
+                return None;
+            };
 
             tracks_matching.push(DiscogsTrackMatch {
                 music_file,
-                track: track.deref().clone(),
-                position: (index + 1) as u32,
+                track: track.clone(),
             })
         }
 
@@ -269,7 +272,7 @@ impl DiscogsMatcher {
             .map_ok(|v| v.results)
             .flatten_ok()
             .map_ok(|v| -> Result<String> {
-                let master: DiscogsMaster = self.fetch_by_url(&v.resource_url, console)?;
+                let master: serialized::DiscogsMaster = self.fetch_by_url(v.resource_url, console)?;
                 Ok(master.main_release_url)
             })
             .flatten()
@@ -334,12 +337,12 @@ impl DiscogsMatcher {
         ]
     }
 
-    fn fetch_release_by_id(&self, release_id: &str, console: &Console) -> Result<DiscogsRelease> {
+    fn fetch_release_by_id(&self, release_id: &str, console: &Console) -> Result<serialized::DiscogsRelease> {
         let url = &format!("https://api.discogs.com/releases/{}", release_id);
         self.fetch_by_url(url, console)
     }
 
-    fn fetch_search_results<I, K, V>(&self, params: I, console: &Console) -> Result<DiscogsSearchResultPage>
+    fn fetch_search_results<I, K, V>(&self, params: I, console: &Console) -> Result<serialized::DiscogsSearchResultPage>
         where
             I: IntoIterator,
             I::Item: Borrow<(K, V)>,

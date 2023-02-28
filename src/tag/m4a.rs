@@ -11,7 +11,7 @@ impl Tag for mp4ameta::Tag {
                     mp4ameta::DataIdent::Fourcc(mp4ameta::ident::ARTIST) => Some(vec![FrameId::Artist]),
                     mp4ameta::DataIdent::Fourcc(mp4ameta::ident::YEAR) => Some(vec![FrameId::Year]),
                     mp4ameta::DataIdent::Fourcc(mp4ameta::ident::TRACK_NUMBER) => Some(vec![FrameId::Track, FrameId::TotalTracks]),
-                    mp4ameta::DataIdent::Fourcc(mp4ameta::ident::DISC_NUMBER) => Some(vec![FrameId::Disc]),
+                    mp4ameta::DataIdent::Fourcc(mp4ameta::ident::DISC_NUMBER) => Some(vec![FrameId::Disc, FrameId::TotalDiscs]),
                     mp4ameta::DataIdent::Fourcc(mp4ameta::ident::CUSTOM_GENRE) => Some(vec![FrameId::Genre]),
                     mp4ameta::DataIdent::Freeform { name, .. } => if data.is_string() {
                         Some(vec![FrameId::CustomText { key: name.to_owned() }])
@@ -121,6 +121,19 @@ impl Tag for mp4ameta::Tag {
         }
     }
 
+    fn total_discs(&self) -> Option<u32> {
+        mp4ameta::Tag::total_discs(self).map(|v| v as u32)
+    }
+
+    fn set_total_discs(&mut self, total_discs: Option<u32>) {
+        if let Some(total_discs) = total_discs {
+            mp4ameta::Tag::set_total_discs(self, total_discs as u16)
+        } else {
+            mp4ameta::Tag::remove_total_discs(self)
+        }
+    }
+
+
     fn genre(&self) -> Option<&str> {
         mp4ameta::Tag::genre(self)
     }
@@ -153,7 +166,7 @@ impl Tag for mp4ameta::Tag {
     }
 
     fn write_to(&self, file: &mut File) -> Result<()> {
-        file.seek(io::SeekFrom::Start(0))?;
+        file.rewind()?;
         mp4ameta::Tag::write_to(self, file)?;
         Ok(())
     }

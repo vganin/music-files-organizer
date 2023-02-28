@@ -1,6 +1,5 @@
 use std::fmt::{Debug, Formatter};
 use std::fs::File;
-use std::io;
 use std::io::{Seek, Write};
 use std::path::Path;
 
@@ -43,6 +42,9 @@ pub trait Tag: DynClone {
     fn disc(&self) -> Option<u32>;
     fn set_disc(&mut self, disc: Option<u32>);
 
+    fn total_discs(&self) -> Option<u32>;
+    fn set_total_discs(&mut self, total_discs: Option<u32>);
+
     fn genre(&self) -> Option<&str>;
     fn set_genre(&mut self, genre: Option<String>);
 
@@ -65,6 +67,7 @@ impl dyn Tag + '_ {
             FrameId::Track => self.track_number().map(FrameContent::U32),
             FrameId::TotalTracks => self.total_tracks().map(FrameContent::U32),
             FrameId::Disc => self.disc().map(FrameContent::U32),
+            FrameId::TotalDiscs => self.total_discs().map(FrameContent::U32),
             FrameId::Genre => self.genre().map(|v| FrameContent::Str(v.to_owned())),
             FrameId::CustomText { key } => self.custom_text(key).map(|v| FrameContent::Str(v.to_owned())),
         }
@@ -90,6 +93,7 @@ impl dyn Tag + '_ {
             FrameId::Track => self.set_track_number(Some(content.as_u32()?)),
             FrameId::TotalTracks => self.set_total_tracks(Some(content.as_u32()?)),
             FrameId::Disc => self.set_disc(Some(content.as_u32()?)),
+            FrameId::TotalDiscs => self.set_total_discs(Some(content.as_u32()?)),
             FrameId::Genre => self.set_genre(Some(content.as_str()?.to_owned())),
             FrameId::CustomText { key } => self.set_custom_text(
                 key.to_owned(), Some(content.as_str()?.to_owned())),
@@ -108,6 +112,7 @@ impl dyn Tag + '_ {
             FrameId::Track => self.set_track_number(None),
             FrameId::TotalTracks => self.set_total_tracks(None),
             FrameId::Disc => self.set_disc(None),
+            FrameId::TotalDiscs => self.set_total_discs(None),
             FrameId::Genre => self.set_genre(None),
             FrameId::CustomText { key } => self.set_custom_text(key.to_owned(), None),
         };

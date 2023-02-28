@@ -67,13 +67,13 @@ pub fn add_covers(
         let discogs_image = discogs_matcher.match_music_files([first_music_file].iter(), console)?.first()
             .and_then(|discogs_match_result| {
                 match discogs_match_result {
-                    Matched { release, .. } => release.best_image().map(ToOwned::to_owned),
+                    Matched { release, .. } => release.image.as_ref().map(ToOwned::to_owned),
                     Unmatched(_) => None
                 }
             });
 
         if let Some(discogs_image) = discogs_image {
-            let cover_uri = &discogs_image.resource_url;
+            let cover_uri = &discogs_image.url;
             let cover_uri_as_file_path = PathBuf::from(Url::parse(cover_uri)?.path());
             let cover_extension = cover_uri_as_file_path.extension().context("Expected extension for cover")?;
             let cover_file_name = PathBuf::from(COVER_FILE_NAME_WITHOUT_EXTENSION).with_extension(cover_extension);

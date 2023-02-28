@@ -4,20 +4,24 @@ use anyhow::Result;
 use dyn_clone::clone_box;
 use itertools::Itertools;
 
-use crate::discogs::model::{DiscogsRelease, DiscogsTrack};
+use crate::discogs::model::refined::{DiscogsRelease, DiscogsTrack};
 use crate::tag::Tag;
 
 #[allow(clippy::borrowed_box)] // FIXME: Fix reference to Box
 pub fn create_tag_from_discogs_data(
     original_tag: &Box<dyn Tag>, // FIXME: Can't create new tag without "template" for now
-    position: u32,
     discogs_track: &DiscogsTrack,
     discogs_release: &DiscogsRelease,
 ) -> Result<Box<dyn Tag>> {
+    let mut new_tag = clone_box(original_tag.deref());
+    new_tag.clear();
+
+    new_tag.set_title(Some(discogs_track.title.to_owned()));
+    new_tag.set_album(Some(discogs_release.title.to_owned()));
     let album_artists: Vec<(&str, &str)> = discogs_release.artists
         .iter()
         .map(|artist| (
-            artist.proper_name(),
+            artist.name.as_str(),
             artist.join.as_deref().unwrap_or("&")
         ))
         .collect_vec();
@@ -27,17 +31,11 @@ pub fn create_tag_from_discogs_data(
             artists
                 .iter()
                 .map(|artist| (
-                    artist.proper_name(),
+                    artist.name.as_str(),
                     artist.join.as_deref().unwrap_or("&")
                 ))
                 .collect_vec()
         });
-
-    let mut new_tag = clone_box(original_tag.deref());
-
-    new_tag.clear();
-    new_tag.set_title(Some(discogs_track.proper_title().to_owned()));
-    new_tag.set_album(Some(discogs_release.proper_title().to_owned()));
     new_tag.set_album_artist(Some(
         if track_artists.is_some() {
             "Various Artists".to_owned()
@@ -61,9 +59,14 @@ pub fn create_tag_from_discogs_data(
             .trim()
             .to_owned()
     ));
-    new_tag.set_year(Some(discogs_release.year as i32));
-    new_tag.set_track_number(Some(position));
-    new_tag.set_total_tracks(Some(discogs_release.valid_track_list().len() as u32));
+    new_tag.set_year(Some(discogs_release.year));
+    new_tag.set_track_number(Some(discogs_track.position));
+    new_tag.set_total_tracks(Some(discogs_release.disc_to_total_tracks[&discogs_track.disc]));
+    let total_discs = discogs_release.disc_to_total_tracks.keys().len() as u32;
+    if total_discs > 1 {
+        new_tag.set_disc(Some(discogs_track.disc));
+        new_tag.set_total_discs(Some(total_discs));
+    }
     new_tag.set_genre(Some(discogs_release.styles.as_deref().unwrap_or_default().join("; ")));
     new_tag.set_custom_text(DISCOGS_RELEASE_TAG.to_owned(), Some(discogs_release.uri.to_owned()));
 

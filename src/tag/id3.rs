@@ -17,7 +17,7 @@ impl Tag for id3::Tag {
                     "TYER" |
                     "TDRC" => vec![FrameId::Year],
                     "TRCK" => vec![FrameId::Track, FrameId::TotalTracks],
-                    "TPOS" => vec![FrameId::Disc],
+                    "TPOS" => vec![FrameId::Disc, FrameId::TotalDiscs],
                     "TCON" => vec![FrameId::Genre],
                     "TXXX" => frame.content().extended_text().into_iter().map(|extended_text| {
                         FrameId::CustomText {
@@ -136,6 +136,19 @@ impl Tag for id3::Tag {
         }
     }
 
+    fn total_discs(&self) -> Option<u32> {
+        id3::TagLike::total_discs(self)
+    }
+
+    fn set_total_discs(&mut self, total_discs: Option<u32>) {
+        if let Some(total_discs) = total_discs {
+            id3::TagLike::set_total_discs(self, total_discs)
+        } else {
+            id3::TagLike::remove_total_discs(self)
+        }
+    }
+
+
     fn genre(&self) -> Option<&str> {
         id3::TagLike::genre(self)
     }
@@ -170,9 +183,9 @@ impl Tag for id3::Tag {
     }
 
     fn write_to(&self, file: &mut File) -> Result<()> {
-        file.seek(io::SeekFrom::Start(0))?;
+        file.rewind()?;
         id3::v1::Tag::remove(file)?;
-        file.seek(io::SeekFrom::Start(0))?;
+        file.rewind()?;
         id3::Encoder::new()
             .version(id3::Version::Id3v24)
             .encode_to_file(self, file)?;

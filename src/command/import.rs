@@ -22,7 +22,7 @@ use DiscogsReleaseMatchResult::{Matched, Unmatched};
 use crate::{Console, console_print, DiscogsMatcher, ImportArgs, pb_finish_with_message, pb_set_message, tag, util};
 use crate::discogs::create_tag::create_tag_from_discogs_data;
 use crate::discogs::matcher::DiscogsReleaseMatchResult;
-use crate::discogs::model::{DiscogsRelease, DiscogsTrack};
+use crate::discogs::model::refined::{DiscogsRelease, DiscogsTrack};
 use crate::music_file::MusicFile;
 use crate::tag::frame::{FrameContent, FrameId};
 use crate::util::console_styleable::ConsoleStyleable;
@@ -165,10 +165,10 @@ fn calculate_changes<'a>(
     let mut music_file_changes = Vec::new();
 
     for discogs_match_result in discogs_match_results {
-        type Item<'a> = (&'a MusicFile, Option<(u32, &'a DiscogsTrack, &'a DiscogsRelease)>);
+        type Item<'a> = (&'a MusicFile, Option<(&'a DiscogsTrack, &'a DiscogsRelease)>);
         let items: Vec<Item> = match discogs_match_result {
             Matched { tracks_matching, release } => {
-                tracks_matching.iter().map(|v| (v.music_file, Some((v.position, &v.track, release)))).collect_vec()
+                tracks_matching.iter().map(|v| (v.music_file, Some((&v.track, release)))).collect_vec()
             }
             Unmatched(music_files) => {
                 music_files.iter().map(|v| (v.deref(), None)).collect_vec()
@@ -177,8 +177,8 @@ fn calculate_changes<'a>(
 
         for (music_file, discogs_info) in items {
             let source_tag = &music_file.tag;
-            let target_tag = if let Some((position, discogs_track, discogs_release)) = discogs_info {
-                create_tag_from_discogs_data(source_tag, position, discogs_track, discogs_release)?
+            let target_tag = if let Some((discogs_track, discogs_release)) = discogs_info {
+                create_tag_from_discogs_data(source_tag, discogs_track, discogs_release)?
             } else {
                 clone_box(music_file.tag.deref())
             };
@@ -192,7 +192,7 @@ fn calculate_changes<'a>(
                 target: MusicFile::from_tag(target_tag, &args.to, transcode_to_mp4, source_extension, music_file.duration)?,
                 transcode_to_mp4,
                 source_file_len: bytes_to_transfer,
-                discogs_release: discogs_info.map(|v| v.2),
+                discogs_release: discogs_info.map(|v| v.1),
             };
 
             music_file_changes.push(music_file_change);
@@ -365,7 +365,8 @@ fn edit_changes<'a>(
                     FrameId::Year => FrameContent::I32(frame_content_as_string.parse::<i32>()?),
                     FrameId::Track |
                     FrameId::TotalTracks |
-                    FrameId::Disc => FrameContent::U32(frame_content_as_string.parse::<u32>()?),
+                    FrameId::Disc |
+                    FrameId::TotalDiscs => FrameContent::U32(frame_content_as_string.parse::<u32>()?),
                 };
                 new_tag.set_frame(&frame_id, Some(frame_content))?;
             }
@@ -436,7 +437,7 @@ fn write_music_files(changes: &Vec<MusicFileChange>, console: &mut Console) -> R
             temp_file
         };
 
-        temp_file.seek(io::SeekFrom::Start(0))?;
+        temp_file.rewind()?;
 
         let source_file_len = change.source_file_len;
         let temp_file_len = temp_file.metadata()?.len();
@@ -514,9 +515,8 @@ fn find_cover_changes(
     let mut cover_changes = HashSet::new();
 
     for music_file_change in music_files_changes {
-        let discogs_release = music_file_change.discogs_release;
-        if let Some(best_image) = discogs_release.as_ref().and_then(|v| v.best_image()) {
-            let uri = &best_image.resource_url;
+        if let Some(best_image) = music_file_change.discogs_release.and_then(|v| v.image.as_ref()) {
+            let uri = &best_image.url;
             let uri_as_file_path = PathBuf::from(Url::parse(uri)?.path());
             let extension = uri_as_file_path.extension_or_empty();
             let file_name = PathBuf::from(COVER_FILE_NAME_WITHOUT_EXTENSION).with_extension(extension);

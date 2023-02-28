@@ -154,6 +154,16 @@ impl Tag for metaflac::Tag {
         }
     }
 
+    fn total_discs(&self) -> Option<u32> {
+        // no-op
+        None
+    }
+
+    fn set_total_discs(&mut self, _total_discs: Option<u32>) {
+        // no-op
+    }
+
+
     fn genre(&self) -> Option<&str> {
         metaflac::Tag::vorbis_comments(self)
             .and_then(|v| v.genre().and_then(|v| v.iter().next()))
@@ -192,10 +202,10 @@ impl Tag for metaflac::Tag {
     }
 
     fn write_to(&self, file: &mut File) -> Result<()> {
-        file.seek(io::SeekFrom::Start(0))?;
+        file.rewind()?;
         let data = metaflac::Tag::skip_metadata(file);
 
-        file.seek(io::SeekFrom::Start(0))?;
+        file.rewind()?;
         file.set_len(0)?;
 
         file.write_all(b"fLaC")?;

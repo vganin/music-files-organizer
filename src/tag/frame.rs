@@ -12,6 +12,7 @@ pub enum FrameId {
     Track,
     TotalTracks,
     Disc,
+    TotalDiscs,
     Genre,
     CustomText { key: String },
 }
@@ -57,6 +58,7 @@ impl Display for FrameId {
             FrameId::Track => "Track",
             FrameId::TotalTracks => "Total Tracks",
             FrameId::Disc => "Disc",
+            FrameId::TotalDiscs => "Total Discs",
             FrameId::Genre => "Genre",
             FrameId::CustomText { key } => key,
         })
@@ -76,6 +78,7 @@ impl FromStr for FrameId {
             "Track" => FrameId::Track,
             "Total Tracks" => FrameId::TotalTracks,
             "Disc" => FrameId::Disc,
+            "Total Discs" => FrameId::TotalDiscs,
             "Genre" => FrameId::Genre,
             key => FrameId::CustomText { key: key.to_owned() },
         })

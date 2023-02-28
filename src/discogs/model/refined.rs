@@ -78,7 +78,7 @@ impl DiscogsRelease {
         let mut used_indexing = false;
         let mut used_parsed_position = false;
         for serialized_track in serialized_tracks {
-            let (disc, position) = if let Some((disc, position)) = DiscogsTrack::disc_position(serialized_track)? {
+            let (disc, position) = if let Some((disc, position)) = DiscogsTrack::disc_position(serialized_track).ok().flatten() {
                 if used_indexing { bail!("Tried to use parsed position while used indexing already") } else { used_parsed_position = true; }
                 if let Some(disc) = disc {
                     (disc, position)
@@ -147,6 +147,7 @@ impl DiscogsTrack {
 
     fn duration(serialized: &serialized::DiscogsTrack) -> Result<Option<Duration>> {
         serialized.duration.as_ref()
+            .filter(|v| !v.is_empty())
             .map(|v| -> Result<_> {
                 let parts = v.split(':').rev().collect::<Vec<_>>();
                 let mut seconds = 0u64;

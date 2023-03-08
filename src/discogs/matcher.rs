@@ -218,6 +218,7 @@ impl DiscogsMatcher {
             let tag = &music_file.tag;
             let track_title = tag.title().or_else(|| music_file.file_path.file_stem().and_then(|v| v.to_str())).unwrap_or_default();
             let Some(track) = track_list.iter().find(|track| {
+                let disc_position_matched = || tag.disc().unwrap_or(1) == track.disc && tag.track_number() == Some(track.position);
                 let title_matched = || track_title.is_similar(&track.title);
                 let duration_matched = || {
                     const DURATION_DIFF_THRESHOLD: Duration = Duration::from_secs(90);
@@ -226,7 +227,7 @@ impl DiscogsMatcher {
                     if duration2 < duration1 { swap(&mut duration1, &mut duration2); };
                     duration2 - duration1 < DURATION_DIFF_THRESHOLD
                 };
-                title_matched() && duration_matched()
+                (title_matched() && duration_matched()) || disc_position_matched()
             }) else { return None; };
 
             tracks_matching.push(DiscogsTrackMatch {

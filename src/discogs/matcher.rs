@@ -208,7 +208,7 @@ impl DiscogsMatcher {
     ) -> Option<Vec<DiscogsTrackMatch<'a>>> {
         let track_list = release.tracks;
 
-        if track_list.is_empty() {
+        if track_list.is_empty() || track_list.len() != music_files.len() {
             return None;
         }
 
@@ -227,7 +227,7 @@ impl DiscogsMatcher {
                     if duration2 < duration1 { swap(&mut duration1, &mut duration2); };
                     duration2 - duration1 < DURATION_DIFF_THRESHOLD
                 };
-                (title_matched() && duration_matched()) || disc_position_matched()
+                (title_matched() && duration_matched()) || (title_matched() && disc_position_matched())
             }) else { return None; };
 
             tracks_matching.push(DiscogsTrackMatch {

@@ -131,7 +131,7 @@ impl DiscogsMatcher {
                 let refined_release = refined::DiscogsRelease::from(&serialized_release)?;
 
                 // FIXME: clone() is redundant here
-                match Self::match_release_with_music_files_complex(refined_release.clone(), &music_files) {
+                match Self::match_release_with_music_files(refined_release.clone(), &music_files) {
                     None => continue,
                     Some(tracks_matching) => {
                         match_result = Matched { tracks_matching, release: refined_release };
@@ -150,7 +150,7 @@ impl DiscogsMatcher {
                         let refined_release = refined::DiscogsRelease::from(&serialized_release)?;
 
                         // FIXME: clone() is redundant here
-                        match Self::match_release_with_music_files_simple(refined_release.clone(), &music_files) {
+                        match Self::match_release_with_music_files(refined_release.clone(), &music_files) {
                             None => {
                                 match Self::ask_for_release_id(
                                     &format!("Failed to match with ID {}", release_id).error_styled().to_string())?
@@ -202,7 +202,7 @@ impl DiscogsMatcher {
         Ok(())
     }
 
-    fn match_release_with_music_files_complex<'a>(
+    fn match_release_with_music_files<'a>(
         release: refined::DiscogsRelease,
         music_files: &Vec<&'a MusicFile>,
     ) -> Option<Vec<DiscogsTrackMatch<'a>>> {
@@ -233,31 +233,6 @@ impl DiscogsMatcher {
             tracks_matching.push(DiscogsTrackMatch {
                 music_file,
                 track: track.deref().clone(),
-            })
-        }
-
-        Some(tracks_matching)
-    }
-
-    fn match_release_with_music_files_simple<'a>(
-        release: refined::DiscogsRelease,
-        music_files: &Vec<&'a MusicFile>,
-    ) -> Option<Vec<DiscogsTrackMatch<'a>>> {
-        let track_list = release.tracks;
-
-        let mut tracks_matching: Vec<DiscogsTrackMatch> = vec![];
-
-        for music_file in music_files {
-            let tag = &music_file.tag;
-            let Some(track) = track_list.iter().find(|track| {
-                tag.disc().unwrap_or(1) == track.disc && tag.track_number() == Some(track.position)
-            }) else {
-                return None;
-            };
-
-            tracks_matching.push(DiscogsTrackMatch {
-                music_file,
-                track: track.clone(),
             })
         }
 

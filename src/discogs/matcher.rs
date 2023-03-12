@@ -221,7 +221,7 @@ impl DiscogsMatcher {
                 let disc_position_matched = || tag.disc().unwrap_or(1) == track.disc && tag.track_number() == Some(track.position);
                 let title_matched = || track_title.is_similar(&track.title);
                 let duration_matched = || {
-                    const DURATION_DIFF_THRESHOLD: Duration = Duration::from_secs(90);
+                    const DURATION_DIFF_THRESHOLD: Duration = Duration::from_secs(30);
                     let Some(mut duration1) = music_file.duration else { return false; };
                     let Some(mut duration2) = track.duration else { return false; };
                     if duration2 < duration1 { swap(&mut duration1, &mut duration2); };

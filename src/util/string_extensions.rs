@@ -19,7 +19,7 @@ impl StringExtensions for str {
     }
 
     fn is_similar(&self, other: &str) -> bool {
-        const SIMILAR_SCORE: f64 = 0.9f64;
+        const SIMILAR_SCORE: f64 = 0.85f64;
         let self_simplified = self.simplify();
         let other_simplified = other.simplify();
         let strings_are_similar = || {

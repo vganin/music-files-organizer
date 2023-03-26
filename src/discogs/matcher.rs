@@ -79,6 +79,7 @@ impl DiscogsMatcher {
     pub fn match_music_files<'a>(
         &self,
         music_files: impl Iterator<Item=&'a MusicFile>,
+        provided_discogs_release_id: &Option<String>,
         console: &Console,
     ) -> Result<Vec<DiscogsReleaseMatchResult<'a>>> {
         let mut files_grouped_by_parent_path: HashMap<&Path, Vec<&MusicFile>> = HashMap::new();
@@ -90,60 +91,69 @@ impl DiscogsMatcher {
         let mut result = Vec::new();
 
         for (path, music_files) in files_grouped_by_parent_path {
-            console_print!(
-                console,
-                "Matching Discogs for {} – {}",
-                music_files
-                    .iter()
-                    .filter_map(|v| v.tag.artist().map(ToString::to_string))
-                    .unique()
-                    .join(" & ")
-                    .tag_styled(),
-                music_files
-                    .iter()
-                    .filter_map(|v| v.tag.album().map(ToString::to_string))
-                    .unique()
-                    .join(", ")
-                    .tag_styled(),
-            );
-
-            let common_search_params = Self::common_search_params_from_music_files(&music_files);
-            let release_urls = common_search_params
-                .iter()
-                .flat_map(|params| {
-                    self.search_master_release(params, console)
-                        .chain(self.search_release(params, console))
-                        .take(5) // No more than 5 release fetches per params combinations to give other combinations realistic chances
-                });
-
             let mut match_result: DiscogsReleaseMatchResult = DiscogsReleaseMatchResult::Unmatched(music_files.clone());
 
-            let mut checked_release_urls = HashSet::new();
-            for release_url in release_urls {
-                let release_url = release_url?;
-                if checked_release_urls.contains(&release_url) {
-                    continue;
-                } else {
-                    checked_release_urls.insert(release_url.clone());
-                }
+            if provided_discogs_release_id.is_none() {
+                console_print!(
+                    console,
+                    "Matching Discogs for {} – {}",
+                    music_files
+                        .iter()
+                        .filter_map(|v| v.tag.artist().map(ToString::to_string))
+                        .unique()
+                        .join(" & ")
+                        .tag_styled(),
+                    music_files
+                        .iter()
+                        .filter_map(|v| v.tag.album().map(ToString::to_string))
+                        .unique()
+                        .join(", ")
+                        .tag_styled(),
+                );
 
-                let serialized_release: serialized::DiscogsRelease = self.fetch_by_url(release_url, console)?;
-                let refined_release = refined::DiscogsRelease::from(&serialized_release)?;
+                let common_search_params = Self::common_search_params_from_music_files(&music_files);
+                let release_urls = common_search_params
+                    .iter()
+                    .flat_map(|params| {
+                        self.search_master_release(params, console)
+                            .chain(self.search_release(params, console))
+                            .take(5) // No more than 5 release fetches per params combinations to give other combinations realistic chances
+                    });
 
-                // FIXME: clone() is redundant here
-                match Self::match_release_with_music_files(refined_release.clone(), &music_files) {
-                    None => continue,
-                    Some(tracks_matching) => {
-                        match_result = Matched { tracks_matching, release: refined_release };
-                        break;
+                let mut checked_release_urls = HashSet::new();
+                for release_url in release_urls {
+                    let release_url = release_url?;
+                    if checked_release_urls.contains(&release_url) {
+                        continue;
+                    } else {
+                        checked_release_urls.insert(release_url.clone());
+                    }
+
+                    let serialized_release: serialized::DiscogsRelease = self.fetch_by_url(release_url, console)?;
+                    let refined_release = refined::DiscogsRelease::from(&serialized_release)?;
+
+                    // FIXME: clone() is redundant here
+                    match Self::match_release_with_music_files(refined_release.clone(), &music_files) {
+                        None => continue,
+                        Some(tracks_matching) => {
+                            match_result = Matched { tracks_matching, release: refined_release };
+                            break;
+                        }
                     }
                 }
             }
 
             if let DiscogsReleaseMatchResult::Unmatched(_) = match_result {
-                if let Some(release_id) = Self::ask_for_release_id(
-                    &format!("Can't find release for {}", path.display().path_styled()))?
-                {
+                let mut release_id = provided_discogs_release_id
+                    .as_ref()
+                    .map(|v| Self::extract_discogs_id(v).map(|v| v.to_owned()))
+                    .transpose()?;
+
+                if release_id.is_none() {
+                    release_id = Self::ask_for_release_id(&format!("Can't find release for {}", path.display().path_styled()))?;
+                }
+
+                if let Some(release_id) = release_id {
                     let mut release_id = release_id;
                     loop {
                         let serialized_release = self.fetch_release_by_id(&release_id, console)?;
@@ -228,7 +238,9 @@ impl DiscogsMatcher {
                     duration2 - duration1 < DURATION_DIFF_THRESHOLD
                 };
                 (title_matched() && duration_matched()) || (title_matched() && disc_position_matched())
-            }) else { return None; };
+            }) else {
+                return None;
+            };
 
             tracks_matching.push(DiscogsTrackMatch {
                 music_file,
@@ -382,21 +394,23 @@ impl DiscogsMatcher {
                 .with_prompt("Please enter Discogs release ID".styled().bold().to_string())
                 .interact_text()
                 .context("Failed to interact")
-                .and_then(|v: String| {
-                    #[allow(clippy::unwrap_used)]
-                        let regex1 = Regex::new(r"^\[r([0-9]+)\]$").unwrap();
-                    #[allow(clippy::unwrap_used)]
-                        let regex2 = Regex::new(r"^([0-9]+)$").unwrap();
-
-                    #[allow(clippy::unwrap_used)]
-                    match regex1.captures(&v).or_else(|| regex2.captures(&v)) {
-                        None => bail!("Invalid Discogs release ID: {}", v),
-                        Some(captures) => Ok(captures.get(1).unwrap().as_str().to_owned())
-                    }
-                })
+                .and_then(|v: String| Self::extract_discogs_id(&v).map(ToOwned::to_owned))
                 .map(Some),
             1 => Ok(None),
             _ => bail!("Unsupported option")
+        }
+    }
+
+    fn extract_discogs_id(string: &str) -> Result<&str> {
+        #[allow(clippy::unwrap_used)]
+            let regex1 = Regex::new(r"^\[r([0-9]+)\]$").unwrap();
+        #[allow(clippy::unwrap_used)]
+            let regex2 = Regex::new(r"^([0-9]+)$").unwrap();
+
+        #[allow(clippy::unwrap_used)]
+        match regex1.captures(string).or_else(|| regex2.captures(string)) {
+            None => bail!("Invalid Discogs release ID: {}", string),
+            Some(captures) => Ok(captures.get(1).unwrap().as_str())
         }
     }
 }

@@ -64,7 +64,11 @@ pub fn import(args: ImportArgs, discogs_matcher: &DiscogsMatcher, console: &mut 
 
     for music_files in music_files_chunks {
         let music_files = music_files?;
-        let discogs_releases = discogs_matcher.match_music_files(music_files.iter(), console)?;
+        let discogs_releases = discogs_matcher.match_music_files(
+            music_files.iter(),
+            &args.discogs_release_id,
+            console,
+        )?;
 
         let mut changes = calculate_changes(&discogs_releases, &args)?;
 

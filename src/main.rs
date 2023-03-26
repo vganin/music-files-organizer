@@ -62,7 +62,10 @@ pub struct ImportArgs {
     fsync: bool,
 
     #[clap(long)]
-    chunk_size: Option<usize>
+    chunk_size: Option<usize>,
+
+    #[clap(long)]
+    discogs_release_id: Option<String>
 }
 
 #[derive(Args)]

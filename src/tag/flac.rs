@@ -5,19 +5,19 @@ impl Tag for metaflac::Tag {
         metaflac::Tag::vorbis_comments(self)
             .iter()
             .flat_map(|v| v.comments.keys())
-            .map(|key| {
-                match key.as_str() {
-                    FLAC_TITLE => FrameId::Title,
-                    FLAC_ALBUM => FrameId::Album,
-                    FLAC_ALBUM_ARTIST => FrameId::AlbumArtist,
-                    FLAC_ARTIST => FrameId::Artist,
-                    FLAC_YEAR => FrameId::Year,
-                    FLAC_TRACK => FrameId::Track,
-                    FLAC_TOTAL_TRACKS => FrameId::TotalTracks,
-                    FLAC_DISC => FrameId::Disc,
-                    FLAC_GENRE => FrameId::Genre,
-                    key => FrameId::CustomText { key: key.to_owned() }
-                }
+            .map(|key| match key.as_str() {
+                FLAC_TITLE => FrameId::Title,
+                FLAC_ALBUM => FrameId::Album,
+                FLAC_ALBUM_ARTIST => FrameId::AlbumArtist,
+                FLAC_ARTIST => FrameId::Artist,
+                FLAC_YEAR => FrameId::Year,
+                FLAC_TRACK => FrameId::Track,
+                FLAC_TOTAL_TRACKS => FrameId::TotalTracks,
+                FLAC_DISC => FrameId::Disc,
+                FLAC_GENRE => FrameId::Genre,
+                key => FrameId::CustomText {
+                    key: key.to_owned(),
+                },
             })
             .collect()
     }
@@ -83,16 +83,15 @@ impl Tag for metaflac::Tag {
     }
 
     fn year(&self) -> Option<i32> {
-        metaflac::Tag::vorbis_comments(self)
-            .and_then(|v| {
-                v.get(FLAC_YEAR).and_then(|s| {
-                    if !s.is_empty() {
-                        s[0].parse::<i32>().ok()
-                    } else {
-                        None
-                    }
-                })
+        metaflac::Tag::vorbis_comments(self).and_then(|v| {
+            v.get(FLAC_YEAR).and_then(|s| {
+                if !s.is_empty() {
+                    s[0].parse::<i32>().ok()
+                } else {
+                    None
+                }
             })
+        })
     }
 
     fn set_year(&mut self, year: Option<i32>) {
@@ -105,8 +104,10 @@ impl Tag for metaflac::Tag {
     }
 
     fn track_number(&self) -> Option<u32> {
-        metaflac::Tag::vorbis_comments(self)
-            .and_then(|v| v.track().or_else(|| Some(vorbis_comment_as_pair(v, FLAC_TRACK)?.0)))
+        metaflac::Tag::vorbis_comments(self).and_then(|v| {
+            v.track()
+                .or_else(|| Some(vorbis_comment_as_pair(v, FLAC_TRACK)?.0))
+        })
     }
 
     fn set_track_number(&mut self, track: Option<u32>) {
@@ -119,8 +120,10 @@ impl Tag for metaflac::Tag {
     }
 
     fn total_tracks(&self) -> Option<u32> {
-        metaflac::Tag::vorbis_comments(self)
-            .and_then(|v| v.total_tracks().or_else(|| vorbis_comment_as_pair(v, FLAC_TRACK)?.1))
+        metaflac::Tag::vorbis_comments(self).and_then(|v| {
+            v.total_tracks()
+                .or_else(|| vorbis_comment_as_pair(v, FLAC_TRACK)?.1)
+        })
     }
 
     fn set_total_tracks(&mut self, total_tracks: Option<u32>) {
@@ -133,16 +136,15 @@ impl Tag for metaflac::Tag {
     }
 
     fn disc(&self) -> Option<u32> {
-        metaflac::Tag::vorbis_comments(self)
-            .and_then(|v| {
-                v.get(FLAC_DISC).and_then(|s| {
-                    if !s.is_empty() {
-                        s[0].parse::<u32>().ok()
-                    } else {
-                        None
-                    }
-                })
+        metaflac::Tag::vorbis_comments(self).and_then(|v| {
+            v.get(FLAC_DISC).and_then(|s| {
+                if !s.is_empty() {
+                    s[0].parse::<u32>().ok()
+                } else {
+                    None
+                }
             })
+        })
     }
 
     fn set_disc(&mut self, disc: Option<u32>) {
@@ -162,7 +164,6 @@ impl Tag for metaflac::Tag {
     fn set_total_discs(&mut self, _total_discs: Option<u32>) {
         // no-op
     }
-
 
     fn genre(&self) -> Option<&str> {
         metaflac::Tag::vorbis_comments(self)
@@ -222,7 +223,10 @@ impl Tag for metaflac::Tag {
     }
 }
 
-fn vorbis_comment_as_pair(tag: &metaflac::block::VorbisComment, id: &str) -> Option<(u32, Option<u32>)> {
+fn vorbis_comment_as_pair(
+    tag: &metaflac::block::VorbisComment,
+    id: &str,
+) -> Option<(u32, Option<u32>)> {
     let text = tag.get(id)?.first()?;
     let mut split = text.splitn(2, &['\0', '/'][..]);
     let a = split.next()?.parse().ok()?;

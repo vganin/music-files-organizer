@@ -6,7 +6,10 @@ use walkdir::WalkDir;
 
 use DiscogsReleaseMatchResult::{Matched, Unmatched};
 
-use crate::{AddCoversArguments, Console, console_print, DiscogsMatcher, pb_finish_with_message, pb_set_message};
+use crate::{
+    AddCoversArguments, Console, console_print, DiscogsMatcher, pb_finish_with_message,
+    pb_set_message,
+};
 use crate::discogs::matcher::DiscogsReleaseMatchResult;
 use crate::music_file::MusicFile;
 use crate::util::console_styleable::ConsoleStyleable;
@@ -23,7 +26,8 @@ pub fn add_covers(
 
     let mut downloaded_covers_count = 0;
 
-    let directories = WalkDir::new(&root_path).into_iter()
+    let directories = WalkDir::new(&root_path)
+        .into_iter()
         .filter_map(Result::ok)
         .filter(|e| e.file_type().is_dir())
         .filter(|e| {
@@ -37,7 +41,11 @@ pub fn add_covers(
 
             let path = e.path();
             for extension in COVER_EXTENSIONS {
-                if Path::exists(&path.join(COVER_FILE_NAME_WITHOUT_EXTENSION).with_extension(extension)) {
+                if Path::exists(
+                    &path
+                        .join(COVER_FILE_NAME_WITHOUT_EXTENSION)
+                        .with_extension(extension),
+                ) {
                     console_print!(console, "Skipped {}", display_path.path_styled());
                     return false;
                 }
@@ -64,23 +72,22 @@ pub fn add_covers(
             continue;
         };
 
-        let discogs_image = discogs_matcher.match_music_files(
-            [first_music_file].iter(),
-            &None,
-            console
-        )?.first()
-            .and_then(|discogs_match_result| {
-                match discogs_match_result {
-                    Matched { release, .. } => release.image.as_ref().map(ToOwned::to_owned),
-                    Unmatched(_) => None
-                }
+        let discogs_image = discogs_matcher
+            .match_music_files([first_music_file].iter(), &None, console)?
+            .first()
+            .and_then(|discogs_match_result| match discogs_match_result {
+                Matched { release, .. } => release.image.as_ref().map(ToOwned::to_owned),
+                Unmatched(_) => None,
             });
 
         if let Some(discogs_image) = discogs_image {
             let cover_uri = &discogs_image.url;
             let cover_uri_as_file_path = PathBuf::from(Url::parse(cover_uri)?.path());
-            let cover_extension = cover_uri_as_file_path.extension().context("Expected extension for cover")?;
-            let cover_file_name = PathBuf::from(COVER_FILE_NAME_WITHOUT_EXTENSION).with_extension(cover_extension);
+            let cover_extension = cover_uri_as_file_path
+                .extension()
+                .context("Expected extension for cover")?;
+            let cover_file_name =
+                PathBuf::from(COVER_FILE_NAME_WITHOUT_EXTENSION).with_extension(cover_extension);
             let cover_path = path.join(cover_file_name);
             let display_path = directory.path().strip_prefix_or_same(&root_path).display();
 
@@ -90,11 +97,22 @@ pub fn add_covers(
 
             downloaded_covers_count += 1;
         } else {
-            console_print!(console, "{}", format!("Failed to fetch cover for {}", path.display().path_styled()).error_styled());
+            console_print!(
+                console,
+                "{}",
+                format!("Failed to fetch cover for {}", path.display().path_styled())
+                    .error_styled()
+            );
         }
     }
 
-    pb_finish_with_message!(pb, "{}", format!("Downloaded {} cover(s)", downloaded_covers_count).styled().green());
+    pb_finish_with_message!(
+        pb,
+        "{}",
+        format!("Downloaded {} cover(s)", downloaded_covers_count)
+            .styled()
+            .green()
+    );
 
     Ok(())
 }

@@ -1,8 +1,4 @@
-#![warn(
-clippy::unwrap_used,
-clippy::panic,
-clippy::expect_used,
-)]
+#![warn(clippy::unwrap_used, clippy::panic, clippy::expect_used)]
 
 extern crate core;
 
@@ -21,11 +17,11 @@ use crate::discogs::matcher::DiscogsMatcher;
 use crate::util::console::Console;
 use crate::util::console_styleable::ConsoleStyleable;
 
-mod tag;
 mod command;
-mod util;
 mod discogs;
 mod music_file;
+mod tag;
+mod util;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -65,7 +61,7 @@ pub struct ImportArgs {
     chunk_size: Option<usize>,
 
     #[clap(long)]
-    discogs_release_id: Option<String>
+    discogs_release_id: Option<String>,
 }
 
 #[derive(Args)]
@@ -88,7 +84,10 @@ fn main() -> ExitCode {
         Ok(_) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("{}", error.deref().error_styled());
-            error.chain().skip(1).for_each(|cause| eprintln!("{} {}", "↳".error_styled(), cause.error_styled()));
+            error
+                .chain()
+                .skip(1)
+                .for_each(|cause| eprintln!("{} {}", "↳".error_styled(), cause.error_styled()));
             eprintln!("\n{}", error.backtrace().error_styled());
             ExitCode::FAILURE
         }

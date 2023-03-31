@@ -9,11 +9,17 @@ pub trait PathExtensions {
 
 impl PathExtensions for Path {
     fn file_name_or_empty(&self) -> &str {
-        self.file_name().unwrap_or_default().to_str().unwrap_or_default()
+        self.file_name()
+            .unwrap_or_default()
+            .to_str()
+            .unwrap_or_default()
     }
 
     fn extension_or_empty(&self) -> &str {
-        self.extension().unwrap_or_default().to_str().unwrap_or_default()
+        self.extension()
+            .unwrap_or_default()
+            .to_str()
+            .unwrap_or_default()
     }
 
     fn strip_prefix_or_same(&self, base: impl AsRef<Path>) -> &Path {

@@ -38,9 +38,14 @@ impl Console {
     }
 
     pub fn println(&self, str: &str) {
-        match self.pbs.iter().find(|pb| !pb.is_hidden() && !pb.is_finished()) {
+        match self
+            .pbs
+            .iter()
+            .find(|pb| !pb.is_hidden() && !pb.is_finished())
+        {
             Some(pb) => pb.println(str),
-            None => {
+            None =>
+            {
                 #[allow(clippy::unwrap_used)]
                 Term::stdout().write_line(str).unwrap()
             }
@@ -67,13 +72,16 @@ impl Console {
             ProgressStyle::default_bar()
                 .tick_strings(TICK_STRINGS)
                 .template("{spinner:.red/yellow} [{elapsed_precise}] {wide_msg}")
-                .unwrap()
+                .unwrap(),
         );
         self.configure_progress_bar(pb)
     }
 
     fn configure_progress_bar(&mut self, pb: ProgressBar) -> ProgressBar {
-        pb.set_draw_target(ProgressDrawTarget::term(self.term.clone(), PROGRESS_REFRESH_RATE));
+        pb.set_draw_target(ProgressDrawTarget::term(
+            self.term.clone(),
+            PROGRESS_REFRESH_RATE,
+        ));
         pb.enable_steady_tick(PROGRESS_TICK_MS);
         self.pbs.push(pb.clone());
         pb
@@ -82,15 +90,4 @@ impl Console {
 
 const PROGRESS_REFRESH_RATE: u8 = 15u8;
 const PROGRESS_TICK_MS: Duration = Duration::from_millis(80u64);
-const TICK_STRINGS: &[&str] = &[
-    "⠋",
-    "⠙",
-    "⠹",
-    "⠸",
-    "⠼",
-    "⠴",
-    "⠦",
-    "⠧",
-    "⠇",
-    "⠏"
-];
+const TICK_STRINGS: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];

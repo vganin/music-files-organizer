@@ -18,37 +18,28 @@ pub fn create_tag_from_discogs_data(
 
     new_tag.set_title(Some(discogs_track.title.to_owned()));
     new_tag.set_album(Some(discogs_release.title.to_owned()));
-    let album_artists: Vec<(&str, &str)> = discogs_release.artists
+    let album_artists: Vec<(&str, &str)> = discogs_release
+        .artists
         .iter()
-        .map(|artist| (
-            artist.name.as_str(),
-            artist.join.as_deref().unwrap_or("&")
-        ))
+        .map(|artist| (artist.name.as_str(), artist.join.as_deref().unwrap_or("&")))
         .collect_vec();
-    let track_artists: Option<Vec<(&str, &str)>> = discogs_track.artists
-        .as_ref()
-        .map(|artists| {
-            artists
-                .iter()
-                .map(|artist| (
-                    artist.name.as_str(),
-                    artist.join.as_deref().unwrap_or("&")
-                ))
-                .collect_vec()
-        });
-    new_tag.set_album_artist(Some(
-        if track_artists.is_some() {
-            "Various Artists".to_owned()
-        } else {
-            album_artists
-                .iter()
-                .flat_map(|v| [v.0, (v.1)])
-                .collect::<Vec<&str>>()
-                .join(" ")
-                .trim()
-                .to_owned()
-        }
-    ));
+    let track_artists: Option<Vec<(&str, &str)>> = discogs_track.artists.as_ref().map(|artists| {
+        artists
+            .iter()
+            .map(|artist| (artist.name.as_str(), artist.join.as_deref().unwrap_or("&")))
+            .collect_vec()
+    });
+    new_tag.set_album_artist(Some(if track_artists.is_some() {
+        "Various Artists".to_owned()
+    } else {
+        album_artists
+            .iter()
+            .flat_map(|v| [v.0, (v.1)])
+            .collect::<Vec<&str>>()
+            .join(" ")
+            .trim()
+            .to_owned()
+    }));
     new_tag.set_artist(Some(
         track_artists
             .unwrap_or(album_artists)
@@ -57,18 +48,29 @@ pub fn create_tag_from_discogs_data(
             .collect_vec()
             .join(" ")
             .trim()
-            .to_owned()
+            .to_owned(),
     ));
     new_tag.set_year(Some(discogs_release.year));
     new_tag.set_track_number(Some(discogs_track.position));
-    new_tag.set_total_tracks(Some(discogs_release.disc_to_total_tracks[&discogs_track.disc]));
+    new_tag.set_total_tracks(Some(
+        discogs_release.disc_to_total_tracks[&discogs_track.disc],
+    ));
     let total_discs = discogs_release.disc_to_total_tracks.keys().len() as u32;
     if total_discs > 1 {
         new_tag.set_disc(Some(discogs_track.disc));
         new_tag.set_total_discs(Some(total_discs));
     }
-    new_tag.set_genre(Some(discogs_release.styles.as_deref().unwrap_or_default().join("; ")));
-    new_tag.set_custom_text(DISCOGS_RELEASE_TAG.to_owned(), Some(discogs_release.uri.to_owned()));
+    new_tag.set_genre(Some(
+        discogs_release
+            .styles
+            .as_deref()
+            .unwrap_or_default()
+            .join("; "),
+    ));
+    new_tag.set_custom_text(
+        DISCOGS_RELEASE_TAG.to_owned(),
+        Some(discogs_release.uri.to_owned()),
+    );
 
     Ok(new_tag)
 }

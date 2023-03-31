@@ -1,9 +1,5 @@
 // Allow panic here because almost everything can panic
-#![allow(
-clippy::unwrap_used,
-clippy::panic,
-clippy::expect_used,
-)]
+#![allow(clippy::unwrap_used, clippy::panic, clippy::expect_used)]
 
 extern crate ffmpeg_next as ffmpeg;
 
@@ -12,7 +8,11 @@ use std::path::Path;
 use ffmpeg::{codec, filter, format, frame, media};
 use ffmpeg::Dictionary;
 
-pub fn to_mp4<ProgressCallback: Fn(usize)>(input: &Path, output: &Path, callback: ProgressCallback) {
+pub fn to_mp4<ProgressCallback: Fn(usize)>(
+    input: &Path,
+    output: &Path,
+    callback: ProgressCallback,
+) {
     transcode(
         input,
         output,
@@ -23,7 +23,7 @@ pub fn to_mp4<ProgressCallback: Fn(usize)>(input: &Path, output: &Path, callback
     );
 }
 
-fn transcode<'a, T: IntoIterator<Item=(&'a str, &'a str)>, PC: Fn(usize)>(
+fn transcode<'a, T: IntoIterator<Item = (&'a str, &'a str)>, PC: Fn(usize)>(
     input: &Path,
     output: &Path,
     output_format: &str,
@@ -35,7 +35,14 @@ fn transcode<'a, T: IntoIterator<Item=(&'a str, &'a str)>, PC: Fn(usize)>(
 
     let mut input_format = format::input(&input).unwrap();
     let mut output_format = format::output_as(&output, output_format).unwrap();
-    let mut transcoder = transcoder(&mut input_format, &mut output_format, output_codec, output_extra_options, "anull").unwrap();
+    let mut transcoder = transcoder(
+        &mut input_format,
+        &mut output_format,
+        output_codec,
+        output_extra_options,
+        "anull",
+    )
+    .unwrap();
 
     output_format.set_metadata(input_format.metadata().to_owned());
     output_format.write_header().unwrap();
@@ -65,7 +72,7 @@ fn transcoder<'a>(
     input_format: &mut format::context::Input,
     output_format: &mut format::context::Output,
     output_codec: &str,
-    output_codec_options: impl IntoIterator<Item=(&'a str, &'a str)>,
+    output_codec_options: impl IntoIterator<Item = (&'a str, &'a str)>,
     filter_spec: &str,
 ) -> Result<Transcoder, ffmpeg::Error> {
     let input = input_format
@@ -100,7 +107,13 @@ fn transcoder<'a>(
     encoder.set_rate(decoder.rate() as i32);
     encoder.set_channel_layout(channel_layout);
     encoder.set_channels(channel_layout.channels());
-    encoder.set_format(codec.formats().expect("unknown supported formats").next().unwrap());
+    encoder.set_format(
+        codec
+            .formats()
+            .expect("unknown supported formats")
+            .next()
+            .unwrap(),
+    );
     encoder.set_bit_rate(decoder.bit_rate());
     encoder.set_max_bit_rate(decoder.max_bit_rate());
 
@@ -159,7 +172,11 @@ fn filter(
             .capabilities()
             .contains(codec::capabilities::Capabilities::VARIABLE_FRAME_SIZE)
         {
-            filter.get("out").unwrap().sink().set_frame_size(encoder.frame_size());
+            filter
+                .get("out")
+                .unwrap()
+                .sink()
+                .set_frame_size(encoder.frame_size());
         }
     }
 
@@ -203,7 +220,14 @@ impl Transcoder {
 
     fn get_and_process_filtered_frames(&mut self, octx: &mut format::context::Output) {
         let mut filtered = frame::Audio::empty();
-        while self.filter.get("out").unwrap().sink().frame(&mut filtered).is_ok() {
+        while self
+            .filter
+            .get("out")
+            .unwrap()
+            .sink()
+            .frame(&mut filtered)
+            .is_ok()
+        {
             self.send_frame_to_encoder(&filtered);
             self.receive_and_process_encoded_packets(octx);
         }

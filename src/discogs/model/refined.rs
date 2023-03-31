@@ -52,7 +52,11 @@ impl DiscogsRelease {
             image: Self::image(serialized),
             tracks,
             disc_to_total_tracks,
-            artists: serialized.artists.iter().map(DiscogsArtist::from).collect_vec(),
+            artists: serialized
+                .artists
+                .iter()
+                .map(DiscogsArtist::from)
+                .collect_vec(),
         })
     }
 
@@ -62,7 +66,9 @@ impl DiscogsRelease {
 
     fn image(serialized: &serialized::DiscogsRelease) -> Option<DiscogsImage> {
         let images = serialized.images.iter().flatten();
-        images.clone().find(|v| v.type_ == "primary")
+        images
+            .clone()
+            .find(|v| v.type_ == "primary")
             .or_else(|| images.clone().find(|v| v.type_ == "secondary"))
             .map(DiscogsImage::from)
     }
@@ -78,15 +84,25 @@ impl DiscogsRelease {
         let mut used_indexing = false;
         let mut used_parsed_position = false;
         for serialized_track in serialized_tracks {
-            let (disc, position) = if let Some((disc, position)) = DiscogsTrack::disc_position(serialized_track).ok().flatten() {
-                if used_indexing { bail!("Tried to use parsed position while used indexing already") } else { used_parsed_position = true; }
+            let (disc, position) = if let Some((disc, position)) =
+                DiscogsTrack::disc_position(serialized_track).ok().flatten()
+            {
+                if used_indexing {
+                    bail!("Tried to use parsed position while used indexing already")
+                } else {
+                    used_parsed_position = true;
+                }
                 if let Some(disc) = disc {
                     (disc, position)
                 } else {
                     (DEFAULT_DISC, position)
                 }
             } else {
-                if used_parsed_position { bail!("Tried to use indexing while used parsed position already") } else { used_indexing = true; }
+                if used_parsed_position {
+                    bail!("Tried to use indexing while used parsed position already")
+                } else {
+                    used_indexing = true;
+                }
                 track_index_position += 1;
                 (DEFAULT_DISC, track_index_position)
             };
@@ -96,14 +112,19 @@ impl DiscogsRelease {
         Ok(refined_tracks)
     }
 
-    fn extract_track_list<'a, It>(track_iterator: It) -> Box<dyn Iterator<Item=&'a serialized::DiscogsTrack> + 'a>
-        where It: IntoIterator<Item=&'a serialized::DiscogsTrack> + 'a,
+    fn extract_track_list<'a, It>(
+        track_iterator: It,
+    ) -> Box<dyn Iterator<Item = &'a serialized::DiscogsTrack> + 'a>
+    where
+        It: IntoIterator<Item = &'a serialized::DiscogsTrack> + 'a,
     {
         Box::new(
             track_iterator
                 .into_iter()
-                .flat_map(|v| iter::once(v).chain(Self::extract_track_list(v.sub_tracks.iter().flatten())))
-                .filter(|v| v.type_ == "track")
+                .flat_map(|v| {
+                    iter::once(v).chain(Self::extract_track_list(v.sub_tracks.iter().flatten()))
+                })
+                .filter(|v| v.type_ == "track"),
         )
     }
 
@@ -125,19 +146,20 @@ impl DiscogsImage {
 }
 
 impl DiscogsTrack {
-    fn from(serialized: &serialized::DiscogsTrack, position: u32, disc: u32) -> Result<DiscogsTrack> {
+    fn from(
+        serialized: &serialized::DiscogsTrack,
+        position: u32,
+        disc: u32,
+    ) -> Result<DiscogsTrack> {
         Ok(DiscogsTrack {
             title: Self::title(serialized),
             position,
             disc,
             duration: Self::duration(serialized)?,
-            artists: serialized.artists
+            artists: serialized
+                .artists
                 .as_ref()
-                .map(|v| {
-                    v.iter()
-                        .map(DiscogsArtist::from)
-                        .collect_vec()
-                }),
+                .map(|v| v.iter().map(DiscogsArtist::from).collect_vec()),
         })
     }
 
@@ -146,7 +168,9 @@ impl DiscogsTrack {
     }
 
     fn duration(serialized: &serialized::DiscogsTrack) -> Result<Option<Duration>> {
-        serialized.duration.as_ref()
+        serialized
+            .duration
+            .as_ref()
             .filter(|v| !v.is_empty())
             .map(|v| -> Result<_> {
                 let parts = v.split(':').rev().collect::<Vec<_>>();
@@ -162,10 +186,12 @@ impl DiscogsTrack {
     }
 
     fn disc_position(serialized: &serialized::DiscogsTrack) -> Result<Option<(Option<u32>, u32)>> {
-        serialized.position
+        serialized
+            .position
             .as_ref()
             .map(|position| {
-                position.split('-')
+                position
+                    .split('-')
                     .next_tuple::<(&str, &str)>()
                     .map(|(a, b)| (Some(a.to_string()), b.to_string()))
                     .unwrap_or_else(|| (None, position.to_string()))
@@ -190,13 +216,17 @@ impl DiscogsArtist {
 
     fn name(serialized: &serialized::DiscogsArtist) -> String {
         let name = &serialized.name;
-        #[allow(clippy::unwrap_used)] let regex = Regex::new(r".*( \(\d+\))").unwrap();
+        #[allow(clippy::unwrap_used)]
+        let regex = Regex::new(r".*( \(\d+\))").unwrap();
         match regex.captures(name) {
             Some(captures) => {
-                #[allow(clippy::unwrap_used)] let range = captures.get(1).unwrap().range();
+                #[allow(clippy::unwrap_used)]
+                let range = captures.get(1).unwrap().range();
                 &name[..range.start]
             }
-            None => name
-        }.trim().to_owned()
+            None => name,
+        }
+        .trim()
+        .to_owned()
     }
 }

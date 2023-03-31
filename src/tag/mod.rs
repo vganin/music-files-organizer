@@ -10,10 +10,10 @@ use frame::*;
 
 use crate::util::console_styleable::ConsoleStyleable;
 
+mod flac;
 pub mod frame;
 mod id3;
 mod m4a;
-mod flac;
 
 pub trait Tag: DynClone {
     fn frame_ids(&self) -> Vec<FrameId>;
@@ -69,7 +69,9 @@ impl dyn Tag + '_ {
             FrameId::Disc => self.disc().map(FrameContent::U32),
             FrameId::TotalDiscs => self.total_discs().map(FrameContent::U32),
             FrameId::Genre => self.genre().map(|v| FrameContent::Str(v.to_owned())),
-            FrameId::CustomText { key } => self.custom_text(key).map(|v| FrameContent::Str(v.to_owned())),
+            FrameId::CustomText { key } => self
+                .custom_text(key)
+                .map(|v| FrameContent::Str(v.to_owned())),
         }
     }
 
@@ -95,8 +97,9 @@ impl dyn Tag + '_ {
             FrameId::Disc => self.set_disc(Some(content.as_u32()?)),
             FrameId::TotalDiscs => self.set_total_discs(Some(content.as_u32()?)),
             FrameId::Genre => self.set_genre(Some(content.as_str()?.to_owned())),
-            FrameId::CustomText { key } => self.set_custom_text(
-                key.to_owned(), Some(content.as_str()?.to_owned())),
+            FrameId::CustomText { key } => {
+                self.set_custom_text(key.to_owned(), Some(content.as_str()?.to_owned()))
+            }
         };
 
         Ok(())
@@ -143,11 +146,22 @@ impl Debug for dyn Tag {
 }
 
 pub fn read_from_path(path: impl AsRef<Path>, format: &str) -> Result<Option<Box<dyn Tag>>> {
-    let context = || format!("Invalid tags in file {}", path.as_ref().display().path_styled());
+    let context = || {
+        format!(
+            "Invalid tags in file {}",
+            path.as_ref().display().path_styled()
+        )
+    };
     match format.to_lowercase().as_ref() {
-        "mp3" => ::id3::Tag::read_from_path(&path).map(|v| Some(Box::new(v) as Box<dyn Tag>)).with_context(context),
-        "m4a" => mp4ameta::Tag::read_from_path(&path).map(|v| Some(Box::new(v) as Box<dyn Tag>)).with_context(context),
-        "flac" => metaflac::Tag::read_from_path(&path).map(|v| Some(Box::new(v) as Box<dyn Tag>)).with_context(context),
-        _ => Ok(None)
+        "mp3" => ::id3::Tag::read_from_path(&path)
+            .map(|v| Some(Box::new(v) as Box<dyn Tag>))
+            .with_context(context),
+        "m4a" => mp4ameta::Tag::read_from_path(&path)
+            .map(|v| Some(Box::new(v) as Box<dyn Tag>))
+            .with_context(context),
+        "flac" => metaflac::Tag::read_from_path(&path)
+            .map(|v| Some(Box::new(v) as Box<dyn Tag>))
+            .with_context(context),
+        _ => Ok(None),
     }
 }

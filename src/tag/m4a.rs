@@ -3,23 +3,33 @@ use super::*;
 impl Tag for mp4ameta::Tag {
     fn frame_ids(&self) -> Vec<FrameId> {
         mp4ameta::Tag::data(self)
-            .filter_map(|(ident, data)| {
-                match ident {
-                    mp4ameta::DataIdent::Fourcc(mp4ameta::ident::TITLE) => Some(vec![FrameId::Title]),
-                    mp4ameta::DataIdent::Fourcc(mp4ameta::ident::ALBUM) => Some(vec![FrameId::Album]),
-                    mp4ameta::DataIdent::Fourcc(mp4ameta::ident::ALBUM_ARTIST) => Some(vec![FrameId::AlbumArtist]),
-                    mp4ameta::DataIdent::Fourcc(mp4ameta::ident::ARTIST) => Some(vec![FrameId::Artist]),
-                    mp4ameta::DataIdent::Fourcc(mp4ameta::ident::YEAR) => Some(vec![FrameId::Year]),
-                    mp4ameta::DataIdent::Fourcc(mp4ameta::ident::TRACK_NUMBER) => Some(vec![FrameId::Track, FrameId::TotalTracks]),
-                    mp4ameta::DataIdent::Fourcc(mp4ameta::ident::DISC_NUMBER) => Some(vec![FrameId::Disc, FrameId::TotalDiscs]),
-                    mp4ameta::DataIdent::Fourcc(mp4ameta::ident::CUSTOM_GENRE) => Some(vec![FrameId::Genre]),
-                    mp4ameta::DataIdent::Freeform { name, .. } => if data.is_string() {
-                        Some(vec![FrameId::CustomText { key: name.to_owned() }])
+            .filter_map(|(ident, data)| match ident {
+                mp4ameta::DataIdent::Fourcc(mp4ameta::ident::TITLE) => Some(vec![FrameId::Title]),
+                mp4ameta::DataIdent::Fourcc(mp4ameta::ident::ALBUM) => Some(vec![FrameId::Album]),
+                mp4ameta::DataIdent::Fourcc(mp4ameta::ident::ALBUM_ARTIST) => {
+                    Some(vec![FrameId::AlbumArtist])
+                }
+                mp4ameta::DataIdent::Fourcc(mp4ameta::ident::ARTIST) => Some(vec![FrameId::Artist]),
+                mp4ameta::DataIdent::Fourcc(mp4ameta::ident::YEAR) => Some(vec![FrameId::Year]),
+                mp4ameta::DataIdent::Fourcc(mp4ameta::ident::TRACK_NUMBER) => {
+                    Some(vec![FrameId::Track, FrameId::TotalTracks])
+                }
+                mp4ameta::DataIdent::Fourcc(mp4ameta::ident::DISC_NUMBER) => {
+                    Some(vec![FrameId::Disc, FrameId::TotalDiscs])
+                }
+                mp4ameta::DataIdent::Fourcc(mp4ameta::ident::CUSTOM_GENRE) => {
+                    Some(vec![FrameId::Genre])
+                }
+                mp4ameta::DataIdent::Freeform { name, .. } => {
+                    if data.is_string() {
+                        Some(vec![FrameId::CustomText {
+                            key: name.to_owned(),
+                        }])
                     } else {
                         None
                     }
-                    _ => None
                 }
+                _ => None,
             })
             .flatten()
             .collect()
@@ -133,7 +143,6 @@ impl Tag for mp4ameta::Tag {
         }
     }
 
-
     fn genre(&self) -> Option<&str> {
         mp4ameta::Tag::genre(self)
     }
@@ -147,8 +156,10 @@ impl Tag for mp4ameta::Tag {
     }
 
     fn custom_text(&self, key: &str) -> Option<&str> {
-        let ident = mp4ameta::DataIdent::from(mp4ameta::FreeformIdent::new("com.apple.iTunes", key));
-        mp4ameta::Tag::strings(self).find(|v| v.0 == &ident)
+        let ident =
+            mp4ameta::DataIdent::from(mp4ameta::FreeformIdent::new("com.apple.iTunes", key));
+        mp4ameta::Tag::strings(self)
+            .find(|v| v.0 == &ident)
             .map(|v| v.1)
     }
 

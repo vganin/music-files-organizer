@@ -1,2 +1,2 @@
-pub mod serialized;
 pub mod refined;
+pub mod serialized;

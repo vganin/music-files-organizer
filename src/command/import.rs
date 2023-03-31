@@ -19,7 +19,10 @@ use walkdir::WalkDir;
 
 use DiscogsReleaseMatchResult::{Matched, Unmatched};
 
-use crate::{Console, console_print, DiscogsMatcher, ImportArgs, pb_finish_with_message, pb_set_message, tag, util};
+use crate::{
+    Console, console_print, DiscogsMatcher, ImportArgs, pb_finish_with_message, pb_set_message, tag,
+    util,
+};
 use crate::discogs::create_tag::create_tag_from_discogs_data;
 use crate::discogs::matcher::DiscogsReleaseMatchResult;
 use crate::discogs::model::refined::{DiscogsRelease, DiscogsTrack};
@@ -55,7 +58,11 @@ struct ChangeList<'a> {
     cleanups: Vec<Cleanup>,
 }
 
-pub fn import(args: ImportArgs, discogs_matcher: &DiscogsMatcher, console: &mut Console) -> Result<()> {
+pub fn import(
+    args: ImportArgs,
+    discogs_matcher: &DiscogsMatcher,
+    console: &mut Console,
+) -> Result<()> {
     if !fs::metadata(&args.to)?.is_dir() {
         bail!("Output path is not a directory")
     }
@@ -121,22 +128,18 @@ pub fn import(args: ImportArgs, discogs_matcher: &DiscogsMatcher, console: &mut 
     Ok(())
 }
 
-fn get_music_files_chunks(args: &ImportArgs) -> impl Iterator<Item=Result<Vec<MusicFile>>> {
+fn get_music_files_chunks(args: &ImportArgs) -> impl Iterator<Item = Result<Vec<MusicFile>>> {
     args.from
         .iter()
         .map(|path| -> Result<_> {
-            Ok(
-                if fs::metadata(path)?.is_dir() {
-                    WalkDir::new(path)
-                        .into_iter()
-                        .filter_ok(|e| e.file_type().is_dir())
-                        .collect_vec()
-                } else {
-                    WalkDir::new(path)
-                        .into_iter()
-                        .collect_vec()
-                }
-            )
+            Ok(if fs::metadata(path)?.is_dir() {
+                WalkDir::new(path)
+                    .into_iter()
+                    .filter_ok(|e| e.file_type().is_dir())
+                    .collect_vec()
+            } else {
+                WalkDir::new(path).into_iter().collect_vec()
+            })
         })
         .flatten_ok()
         .flatten_ok()
@@ -169,14 +172,19 @@ fn calculate_changes<'a>(
     let mut music_file_changes = Vec::new();
 
     for discogs_match_result in discogs_match_results {
-        type Item<'a> = (&'a MusicFile, Option<(&'a DiscogsTrack, &'a DiscogsRelease)>);
+        type Item<'a> = (
+            &'a MusicFile,
+            Option<(&'a DiscogsTrack, &'a DiscogsRelease)>,
+        );
         let items: Vec<Item> = match discogs_match_result {
-            Matched { tracks_matching, release } => {
-                tracks_matching.iter().map(|v| (v.music_file, Some((&v.track, release)))).collect_vec()
-            }
-            Unmatched(music_files) => {
-                music_files.iter().map(|v| (v.deref(), None)).collect_vec()
-            }
+            Matched {
+                tracks_matching,
+                release,
+            } => tracks_matching
+                .iter()
+                .map(|v| (v.music_file, Some((&v.track, release))))
+                .collect_vec(),
+            Unmatched(music_files) => music_files.iter().map(|v| (v.deref(), None)).collect_vec(),
         };
 
         for (music_file, discogs_info) in items {
@@ -193,7 +201,13 @@ fn calculate_changes<'a>(
 
             let music_file_change = MusicFileChange {
                 source: music_file,
-                target: MusicFile::from_tag(target_tag, &args.to, transcode_to_mp4, source_extension, music_file.duration)?,
+                target: MusicFile::from_tag(
+                    target_tag,
+                    &args.to,
+                    transcode_to_mp4,
+                    source_extension,
+                    music_file.duration,
+                )?,
                 transcode_to_mp4,
                 source_file_len: bytes_to_transfer,
                 discogs_release: discogs_info.map(|v| v.1),
@@ -219,25 +233,16 @@ fn calculate_changes<'a>(
         }
     });
 
-    full_change_list(
-        music_file_changes,
-        args,
-    )
+    full_change_list(music_file_changes, args)
 }
 
 fn full_change_list<'a>(
     music_file_changes: Vec<MusicFileChange<'a>>,
     args: &ImportArgs,
 ) -> Result<ChangeList<'a>> {
-    let cover_changes = find_cover_changes(
-        &music_file_changes
-    )?;
+    let cover_changes = find_cover_changes(&music_file_changes)?;
 
-    let cleanups = find_cleanups(
-        &music_file_changes,
-        &cover_changes,
-        args,
-    )?;
+    let cleanups = find_cleanups(&music_file_changes, &cover_changes, args)?;
 
     Ok(ChangeList {
         music_files: music_file_changes,
@@ -260,19 +265,37 @@ fn print_changes_details(changes: &ChangeList, console: &Console) {
                 console,
                 "{:02}. {} {}",
                 step_number,
-                if change.transcode_to_mp4 { "Transcode" } else { "Update" }.styled().yellow(),
+                if change.transcode_to_mp4 {
+                    "Transcode"
+                } else {
+                    "Update"
+                }
+                .styled()
+                .yellow(),
                 source_file_path.file_name_or_empty().path_styled(),
             );
         } else {
-            let common_file_prefix = common_path::common_path(source_file_path, target_file_path)
-                .unwrap_or_default();
+            let common_file_prefix =
+                common_path::common_path(source_file_path, target_file_path).unwrap_or_default();
             console_print!(
                 console,
                 "{:02}. {} {} → {}",
                 step_number,
-                if change.transcode_to_mp4 { "Transcode" } else { "Copy" }.styled().green(),
-                source_file_path.strip_prefix_or_same(&common_file_prefix).display().path_styled(),
-                target_file_path.strip_prefix_or_same(&common_file_prefix).display().path_styled(),
+                if change.transcode_to_mp4 {
+                    "Transcode"
+                } else {
+                    "Copy"
+                }
+                .styled()
+                .green(),
+                source_file_path
+                    .strip_prefix_or_same(&common_file_prefix)
+                    .display()
+                    .path_styled(),
+                target_file_path
+                    .strip_prefix_or_same(&common_file_prefix)
+                    .display()
+                    .path_styled(),
             );
         }
 
@@ -286,8 +309,14 @@ fn print_changes_details(changes: &ChangeList, console: &Console) {
                     console,
                     "    {}: {} → {}",
                     frame_id,
-                    source_frame_value.unwrap_or_else(|| String::from("None")).styled().red(),
-                    target_frame_value.unwrap_or_else(|| String::from("None")).styled().green(),
+                    source_frame_value
+                        .unwrap_or_else(|| String::from("None"))
+                        .styled()
+                        .red(),
+                    target_frame_value
+                        .unwrap_or_else(|| String::from("None"))
+                        .styled()
+                        .green(),
                 );
             }
         }
@@ -318,10 +347,7 @@ fn print_changes_details(changes: &ChangeList, console: &Console) {
     }
 }
 
-fn edit_changes<'a>(
-    changes: ChangeList<'a>,
-    args: &ImportArgs,
-) -> Result<ChangeList<'a>> {
+fn edit_changes<'a>(changes: ChangeList<'a>, args: &ImportArgs) -> Result<ChangeList<'a>> {
     const TRACK_DELIMITER: &str = "--------------------------";
     let line_pattern: Regex = Regex::new(r"^(.+?): (.*)$")?;
     let mut editor_prompt = String::new();
@@ -330,7 +356,12 @@ fn edit_changes<'a>(
         let tag = &music_file.target.tag;
         for frame_id in &tag.frame_ids() {
             let frame_content = tag.frame_content(frame_id);
-            writeln!(&mut editor_prompt, "{}: {}", frame_id, frame_content.map(|v| v.to_string()).unwrap_or_default())?;
+            writeln!(
+                &mut editor_prompt,
+                "{}: {}",
+                frame_id,
+                frame_content.map(|v| v.to_string()).unwrap_or_default()
+            )?;
         }
 
         editor_prompt.push_str(TRACK_DELIMITER);
@@ -347,30 +378,37 @@ fn edit_changes<'a>(
             new_tag.clear();
 
             loop {
-                let line = edited_lines.next().context("Failed to find meta for track")?;
+                let line = edited_lines
+                    .next()
+                    .context("Failed to find meta for track")?;
 
                 if line == TRACK_DELIMITER {
                     break;
                 }
 
                 let invalid_line_context = || format!("Invalid line: {}", line);
-                let captures = line_pattern.captures(line).with_context(invalid_line_context)?;
-                let frame_id_as_string = captures.get(1).with_context(invalid_line_context)?.as_str();
-                let frame_content_as_string = captures.get(2).with_context(invalid_line_context)?.as_str();
+                let captures = line_pattern
+                    .captures(line)
+                    .with_context(invalid_line_context)?;
+                let frame_id_as_string =
+                    captures.get(1).with_context(invalid_line_context)?.as_str();
+                let frame_content_as_string =
+                    captures.get(2).with_context(invalid_line_context)?.as_str();
                 let frame_id = FrameId::from_str(frame_id_as_string)?;
 
                 let frame_content = match frame_id {
-                    FrameId::Title |
-                    FrameId::Album |
-                    FrameId::AlbumArtist |
-                    FrameId::Artist |
-                    FrameId::Genre |
-                    FrameId::CustomText { .. } => FrameContent::Str(frame_content_as_string.to_owned()),
+                    FrameId::Title
+                    | FrameId::Album
+                    | FrameId::AlbumArtist
+                    | FrameId::Artist
+                    | FrameId::Genre
+                    | FrameId::CustomText { .. } => {
+                        FrameContent::Str(frame_content_as_string.to_owned())
+                    }
                     FrameId::Year => FrameContent::I32(frame_content_as_string.parse::<i32>()?),
-                    FrameId::Track |
-                    FrameId::TotalTracks |
-                    FrameId::Disc |
-                    FrameId::TotalDiscs => FrameContent::U32(frame_content_as_string.parse::<u32>()?),
+                    FrameId::Track | FrameId::TotalTracks | FrameId::Disc | FrameId::TotalDiscs => {
+                        FrameContent::U32(frame_content_as_string.parse::<u32>()?)
+                    }
                 };
                 new_tag.set_frame(&frame_id, Some(frame_content))?;
             }
@@ -387,22 +425,18 @@ fn edit_changes<'a>(
             })
         }
 
-
-        Ok(full_change_list(
-            new_music_file_changes,
-            args,
-        )?)
+        Ok(full_change_list(new_music_file_changes, args)?)
     } else {
         Ok(changes)
     }
 }
 
 fn write_music_files(changes: &Vec<MusicFileChange>, console: &mut Console) -> Result<()> {
-    if changes.is_empty() { return Ok(()); };
+    if changes.is_empty() {
+        return Ok(());
+    };
 
-    let total_bytes_to_transfer: u64 = changes.iter()
-        .map(|v| v.source_file_len)
-        .sum();
+    let total_bytes_to_transfer: u64 = changes.iter().map(|v| v.source_file_len).sum();
 
     let pb = console.new_default_progress_bar(total_bytes_to_transfer);
 
@@ -413,28 +447,32 @@ fn write_music_files(changes: &Vec<MusicFileChange>, console: &mut Console) -> R
         let target_path = &target.file_path;
         let target_tag = &target.tag;
 
-        pb_set_message!(pb, "Writing {}", source_path.file_name_or_empty().path_styled());
+        pb_set_message!(
+            pb,
+            "Writing {}",
+            source_path.file_name_or_empty().path_styled()
+        );
 
         fs::create_dir_all(target_path.parent_or_empty())?;
 
         let mut temp_file = if change.transcode_to_mp4 {
             let mut named_temp_file = NamedTempFile::new()?;
             let named_temp_file_path = named_temp_file.path();
-            transcode::to_mp4(
-                source_path,
-                named_temp_file_path,
-                |bytes| pb.inc(bytes as u64 / 2),
-            );
-            let mut tag = tag::read_from_path(named_temp_file_path, "m4a")?
-                .with_context(|| format!("Failed to read from temp file {}", named_temp_file_path.display().path_styled()))?;
+            transcode::to_mp4(source_path, named_temp_file_path, |bytes| {
+                pb.inc(bytes as u64 / 2)
+            });
+            let mut tag = tag::read_from_path(named_temp_file_path, "m4a")?.with_context(|| {
+                format!(
+                    "Failed to read from temp file {}",
+                    named_temp_file_path.display().path_styled()
+                )
+            })?;
             tag.set_from(target_tag.as_ref())?;
             tag.write_to(named_temp_file.as_file_mut())?;
             named_temp_file.into_file()
         } else {
-            let mut source_file = ProgressReader::new(
-                File::open(source_path)?,
-                |bytes| pb.inc(bytes as u64 / 2),
-            );
+            let mut source_file =
+                ProgressReader::new(File::open(source_path)?, |bytes| pb.inc(bytes as u64 / 2));
             let mut temp_file = tempfile::tempfile()?;
             io::copy(&mut source_file, &mut temp_file)?;
             target_tag.write_to(&mut temp_file)?;
@@ -445,15 +483,20 @@ fn write_music_files(changes: &Vec<MusicFileChange>, console: &mut Console) -> R
 
         let source_file_len = change.source_file_len;
         let temp_file_len = temp_file.metadata()?.len();
-        let mut target_file = ProgressWriter::new(
-            File::create(target_path)?,
-            |bytes| pb.inc(bytes as u64 * source_file_len / temp_file_len / 2),
-        );
+        let mut target_file = ProgressWriter::new(File::create(target_path)?, |bytes| {
+            pb.inc(bytes as u64 * source_file_len / temp_file_len / 2)
+        });
 
         io::copy(&mut temp_file, &mut target_file)?;
     }
 
-    pb_finish_with_message!(pb, "{}", format!("Written {} file(s)", &changes.len()).styled().green());
+    pb_finish_with_message!(
+        pb,
+        "{}",
+        format!("Written {} file(s)", &changes.len())
+            .styled()
+            .green()
+    );
 
     Ok(())
 }
@@ -463,7 +506,9 @@ fn download_covers(
     changes: &Vec<CoverChange>,
     console: &mut Console,
 ) -> Result<()> {
-    if changes.is_empty() { return Ok(()); };
+    if changes.is_empty() {
+        return Ok(());
+    };
 
     let count = changes.len();
     let pb = console.new_default_progress_bar(!0);
@@ -473,7 +518,11 @@ fn download_covers(
         discogs_matcher.download_cover(&change.uri, &change.path, &pb, console)?;
     }
 
-    pb_finish_with_message!(pb, "{}", format!("Downloaded {} cover(s)", count).styled().green());
+    pb_finish_with_message!(
+        pb,
+        "{}",
+        format!("Downloaded {} cover(s)", count).styled().green()
+    );
 
     Ok(())
 }
@@ -493,10 +542,13 @@ fn cleanup(cleanups: &[Cleanup]) -> Result<()> {
     for cleanup in cleanups {
         let mut path: &Path = &cleanup.path;
         while let Some(parent) = path.parent() {
-            if Path::exists(parent) &&
-                parent.read_dir()?.next().is_none() &&
-                Confirm::new()
-                    .with_prompt(format!("Directory {} is now empty. Do you wish to remove it?", parent.display().path_styled()))
+            if Path::exists(parent)
+                && parent.read_dir()?.next().is_none()
+                && Confirm::new()
+                    .with_prompt(format!(
+                        "Directory {} is now empty. Do you wish to remove it?",
+                        parent.display().path_styled()
+                    ))
                     .default(true)
                     .show_default(true)
                     .wait_for_newline(true)
@@ -513,19 +565,25 @@ fn cleanup(cleanups: &[Cleanup]) -> Result<()> {
     Ok(())
 }
 
-fn find_cover_changes(
-    music_files_changes: &Vec<MusicFileChange>
-) -> Result<Vec<CoverChange>> {
+fn find_cover_changes(music_files_changes: &Vec<MusicFileChange>) -> Result<Vec<CoverChange>> {
     let mut cover_changes = HashSet::new();
 
     for music_file_change in music_files_changes {
-        if let Some(best_image) = music_file_change.discogs_release.and_then(|v| v.image.as_ref()) {
+        if let Some(best_image) = music_file_change
+            .discogs_release
+            .and_then(|v| v.image.as_ref())
+        {
             let uri = &best_image.url;
             let uri_as_file_path = PathBuf::from(Url::parse(uri)?.path());
             let extension = uri_as_file_path.extension_or_empty();
-            let file_name = PathBuf::from(COVER_FILE_NAME_WITHOUT_EXTENSION).with_extension(extension);
+            let file_name =
+                PathBuf::from(COVER_FILE_NAME_WITHOUT_EXTENSION).with_extension(extension);
             cover_changes.insert(CoverChange {
-                path: music_file_change.target.file_path.parent_or_empty().join(file_name),
+                path: music_file_change
+                    .target
+                    .file_path
+                    .parent_or_empty()
+                    .join(file_name),
                 uri: uri.to_owned(),
             });
         }
@@ -558,7 +616,8 @@ fn find_cleanups(
 
     if args.clean_target_folders {
         for target_folder_path in target_folder_paths {
-            target_folder_path.read_dir()
+            target_folder_path
+                .read_dir()
                 .into_iter()
                 .flatten()
                 .filter_map(Result::ok)
@@ -573,7 +632,8 @@ fn find_cleanups(
 
     if args.clean_source_folders {
         for source_folder_path in source_folder_paths {
-            source_folder_path.read_dir()
+            source_folder_path
+                .read_dir()
                 .into_iter()
                 .flatten()
                 .filter_map(Result::ok)
@@ -590,7 +650,10 @@ fn find_cleanups(
 }
 
 fn fsync(changes: &ChangeList, console: &mut Console) -> Result<()> {
-    let folders = changes.music_files.iter().map(|v| &v.target.file_path)
+    let folders = changes
+        .music_files
+        .iter()
+        .map(|v| &v.target.file_path)
         .chain(changes.covers.iter().map(|v| &v.path))
         .map(|v| v.parent_or_empty())
         .unique()

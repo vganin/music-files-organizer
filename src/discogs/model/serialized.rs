@@ -36,7 +36,8 @@ pub struct DiscogsArtist {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct DiscogsImage {
     pub resource_url: String,
-    #[serde(alias = "type")] pub type_: String,
+    #[serde(alias = "type")]
+    pub type_: String,
 }
 
 #[derive(Serialize, Deserialize)]

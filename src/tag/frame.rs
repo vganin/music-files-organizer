@@ -28,40 +28,44 @@ impl FrameContent {
     pub fn as_str(&self) -> Result<&str> {
         match self {
             FrameContent::Str(v) => Ok(v),
-            _ => bail!("Value is not a string")
+            _ => bail!("Value is not a string"),
         }
     }
 
     pub fn as_i32(&self) -> Result<i32> {
         match self {
             FrameContent::I32(v) => Ok(*v),
-            _ => bail!("Value is not a signed integer")
+            _ => bail!("Value is not a signed integer"),
         }
     }
 
     pub fn as_u32(&self) -> Result<u32> {
         match self {
             FrameContent::U32(v) => Ok(*v),
-            _ => bail!("Value is not an unsigned integer")
+            _ => bail!("Value is not an unsigned integer"),
         }
     }
 }
 
 impl Display for FrameId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", match self {
-            FrameId::Title => "Title",
-            FrameId::Album => "Album",
-            FrameId::AlbumArtist => "Album Artist",
-            FrameId::Artist => "Artist",
-            FrameId::Year => "Year",
-            FrameId::Track => "Track",
-            FrameId::TotalTracks => "Total Tracks",
-            FrameId::Disc => "Disc",
-            FrameId::TotalDiscs => "Total Discs",
-            FrameId::Genre => "Genre",
-            FrameId::CustomText { key } => key,
-        })
+        write!(
+            f,
+            "{}",
+            match self {
+                FrameId::Title => "Title",
+                FrameId::Album => "Album",
+                FrameId::AlbumArtist => "Album Artist",
+                FrameId::Artist => "Artist",
+                FrameId::Year => "Year",
+                FrameId::Track => "Track",
+                FrameId::TotalTracks => "Total Tracks",
+                FrameId::Disc => "Disc",
+                FrameId::TotalDiscs => "Total Discs",
+                FrameId::Genre => "Genre",
+                FrameId::CustomText { key } => key,
+            }
+        )
     }
 }
 
@@ -80,7 +84,9 @@ impl FromStr for FrameId {
             "Disc" => FrameId::Disc,
             "Total Discs" => FrameId::TotalDiscs,
             "Genre" => FrameId::Genre,
-            key => FrameId::CustomText { key: key.to_owned() },
+            key => FrameId::CustomText {
+                key: key.to_owned(),
+            },
         })
     }
 }

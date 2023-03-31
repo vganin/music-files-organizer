@@ -1,4 +1,4 @@
-use ::id3 as id3;
+use ::id3;
 use anyhow::Result;
 use itertools::Itertools;
 
@@ -8,24 +8,24 @@ impl Tag for id3::Tag {
     fn frame_ids(&self) -> Vec<FrameId> {
         id3::Tag::frames(self)
             .into_iter()
-            .flat_map(|frame| {
-                match frame.id() {
-                    "TIT2" => vec![FrameId::Title],
-                    "TALB" => vec![FrameId::Album],
-                    "TPE2" => vec![FrameId::AlbumArtist],
-                    "TPE1" => vec![FrameId::Artist],
-                    "TYER" |
-                    "TDRC" => vec![FrameId::Year],
-                    "TRCK" => vec![FrameId::Track, FrameId::TotalTracks],
-                    "TPOS" => vec![FrameId::Disc, FrameId::TotalDiscs],
-                    "TCON" => vec![FrameId::Genre],
-                    "TXXX" => frame.content().extended_text().into_iter().map(|extended_text| {
-                        FrameId::CustomText {
-                            key: extended_text.description.to_owned()
-                        }
-                    }).collect_vec(),
-                    _ => vec![]
-                }
+            .flat_map(|frame| match frame.id() {
+                "TIT2" => vec![FrameId::Title],
+                "TALB" => vec![FrameId::Album],
+                "TPE2" => vec![FrameId::AlbumArtist],
+                "TPE1" => vec![FrameId::Artist],
+                "TYER" | "TDRC" => vec![FrameId::Year],
+                "TRCK" => vec![FrameId::Track, FrameId::TotalTracks],
+                "TPOS" => vec![FrameId::Disc, FrameId::TotalDiscs],
+                "TCON" => vec![FrameId::Genre],
+                "TXXX" => frame
+                    .content()
+                    .extended_text()
+                    .into_iter()
+                    .map(|extended_text| FrameId::CustomText {
+                        key: extended_text.description.to_owned(),
+                    })
+                    .collect_vec(),
+                _ => vec![],
             })
             .collect_vec()
     }
@@ -79,22 +79,24 @@ impl Tag for id3::Tag {
     }
 
     fn year(&self) -> Option<i32> {
-        id3::TagLike::date_recorded(self).map(|date| date.year)
-            .or_else(|| {
-                id3::TagLike::year(self)
-            })
+        id3::TagLike::date_recorded(self)
+            .map(|date| date.year)
+            .or_else(|| id3::TagLike::year(self))
     }
 
     fn set_year(&mut self, year: Option<i32>) {
         if let Some(year) = year {
-            id3::TagLike::set_date_recorded(self, id3::Timestamp {
-                year,
-                month: None,
-                day: None,
-                hour: None,
-                minute: None,
-                second: None,
-            });
+            id3::TagLike::set_date_recorded(
+                self,
+                id3::Timestamp {
+                    year,
+                    month: None,
+                    day: None,
+                    hour: None,
+                    minute: None,
+                    second: None,
+                },
+            );
         } else {
             id3::TagLike::remove_date_recorded(self)
         }
@@ -148,7 +150,6 @@ impl Tag for id3::Tag {
         }
     }
 
-
     fn genre(&self) -> Option<&str> {
         id3::TagLike::genre(self)
     }
@@ -169,10 +170,13 @@ impl Tag for id3::Tag {
 
     fn set_custom_text(&mut self, key: String, value: Option<String>) {
         if let Some(value) = value {
-            id3::TagLike::add_frame(self, id3::frame::ExtendedText {
-                description: key,
-                value,
-            });
+            id3::TagLike::add_frame(
+                self,
+                id3::frame::ExtendedText {
+                    description: key,
+                    value,
+                },
+            );
         } else {
             id3::TagLike::remove_extended_text(self, Some(&key), None);
         }

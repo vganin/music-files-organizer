@@ -20,9 +20,9 @@ use walkdir::WalkDir;
 use DiscogsReleaseMatchResult::{Matched, Unmatched};
 
 use crate::{
-    Console, console_print, DiscogsMatcher, ImportArgs, pb_finish_with_message, pb_set_message, tag,
-    util,
+    Console, console_print, DiscogsMatcher, pb_finish_with_message, pb_set_message, tag, util,
 };
+use crate::cli::ImportArgs;
 use crate::discogs::create_tag::create_tag_from_discogs_data;
 use crate::discogs::matcher::DiscogsReleaseMatchResult;
 use crate::discogs::model::refined::{DiscogsRelease, DiscogsTrack};

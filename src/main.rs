@@ -8,76 +8,23 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use anyhow::{Context, Result};
-use clap::{Args, Parser, Subcommand};
+use clap::Parser;
 
+use crate::cli::{Cli, Command};
 use crate::command::add_covers::add_covers;
 use crate::command::fsync::fsync;
+use crate::command::generate_completions::generate_completions;
 use crate::command::import::import;
 use crate::discogs::matcher::DiscogsMatcher;
 use crate::util::console::Console;
 use crate::util::console_styleable::ConsoleStyleable;
 
+mod cli;
 mod command;
 mod discogs;
 mod music_file;
 mod tag;
 mod util;
-
-#[derive(Parser)]
-#[clap(author, version, about, long_about = None)]
-struct Cli {
-    #[clap(long)]
-    discogs_token: Option<String>,
-
-    #[clap(subcommand)]
-    command: Command,
-}
-
-#[derive(Subcommand)]
-enum Command {
-    Import(ImportArgs),
-    AddCovers(AddCoversArguments),
-    Fsync(FsyncArguments),
-}
-
-#[derive(Args)]
-pub struct ImportArgs {
-    #[clap(long, num_args = 1..)]
-    from: Vec<PathBuf>,
-
-    #[clap(long)]
-    to: PathBuf,
-
-    #[clap(long, default_value_t = true, action = clap::ArgAction::Set)]
-    clean_target_folders: bool,
-
-    #[clap(long, default_value_t = true, action = clap::ArgAction::Set)]
-    clean_source_folders: bool,
-
-    #[clap(long, default_value_t = true, action = clap::ArgAction::Set)]
-    fsync: bool,
-
-    #[clap(long)]
-    chunk_size: Option<usize>,
-
-    #[clap(long)]
-    discogs_release_id: Option<String>,
-}
-
-#[derive(Args)]
-pub struct AddCoversArguments {
-    #[clap(long)]
-    to: PathBuf,
-
-    #[clap(long, default_value_t = false, action = clap::ArgAction::Set)]
-    skip_if_present: bool,
-}
-
-#[derive(Args)]
-pub struct FsyncArguments {
-    #[clap()]
-    path: PathBuf,
-}
 
 fn main() -> ExitCode {
     match try_main() {
@@ -111,6 +58,7 @@ fn try_main() -> Result<()> {
     let mut console = Console::new();
 
     match cli.command {
+        Command::GenerateCompletions(args) => generate_completions(args),
         Command::Import(args) => import(args, &discogs_matcher, &mut console)?,
         Command::AddCovers(args) => add_covers(args, &discogs_matcher, &mut console)?,
         Command::Fsync(args) => fsync(args, &mut console)?,

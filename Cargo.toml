@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = { version = "*", features = ["backtrace"] }
 clap = { version = "*", features = ["derive"] }
+clap_complete = "*"
 id3 = "*"
 mp4ameta = "*"
 metaflac = "*"

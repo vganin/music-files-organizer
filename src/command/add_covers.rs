@@ -6,10 +6,8 @@ use walkdir::WalkDir;
 
 use DiscogsReleaseMatchResult::{Matched, Unmatched};
 
-use crate::{
-    AddCoversArguments, Console, console_print, DiscogsMatcher, pb_finish_with_message,
-    pb_set_message,
-};
+use crate::{Console, console_print, DiscogsMatcher, pb_finish_with_message, pb_set_message};
+use crate::cli::AddCoversArguments;
 use crate::discogs::matcher::DiscogsReleaseMatchResult;
 use crate::music_file::MusicFile;
 use crate::util::console_styleable::ConsoleStyleable;

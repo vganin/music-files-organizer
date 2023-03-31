@@ -1,6 +1,7 @@
 use anyhow::Result;
 
-use crate::{FsyncArguments, util};
+use crate::cli::FsyncArguments;
+use crate::util;
 use crate::util::console::Console;
 
 pub fn fsync(args: FsyncArguments, console: &mut Console) -> Result<()> {

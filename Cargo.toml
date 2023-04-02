@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = { version = "*", features = ["backtrace"] }
+once_cell = "*"
 clap = { version = "*", features = ["derive"] }
 clap_complete = "*"
 id3 = "*"

@@ -33,7 +33,7 @@ pub struct ImportArgs {
     pub from: Vec<PathBuf>,
 
     #[clap(long)]
-    pub to: PathBuf,
+    pub to: Option<PathBuf>,
 
     #[clap(long, default_value_t = true, action = clap::ArgAction::Set)]
     pub clean_target_folders: bool,
@@ -53,11 +53,8 @@ pub struct ImportArgs {
 
 #[derive(Args)]
 pub struct AddCoversArguments {
-    #[clap(long)]
+    #[clap()]
     pub to: PathBuf,
-
-    #[clap(long, default_value_t = false, action = clap::ArgAction::Set)]
-    pub skip_if_present: bool,
 }
 
 #[derive(Args)]

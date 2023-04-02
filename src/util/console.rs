@@ -2,11 +2,22 @@ use std::time::Duration;
 
 use console::Term;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
+use once_cell::sync::Lazy;
+
+static mut CONSOLE: Lazy<Console> = Lazy::new(Console::new);
+
+pub fn get() -> &'static Console {
+    unsafe { &CONSOLE }
+}
+
+pub fn get_mut() -> &'static mut Console {
+    unsafe { &mut CONSOLE }
+}
 
 #[macro_export]
 macro_rules! console_print {
-    ($console:expr, $($arg:tt)*) => ({
-        $console.println(&format!($($arg)*));
+    ($($arg:tt)*) => ({
+        $crate::util::console::get().println(&format!($($arg)*));
     })
 }
 
@@ -30,7 +41,7 @@ pub struct Console {
 }
 
 impl Console {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self {
             term: Term::buffered_stdout(),
             pbs: Vec::new(),

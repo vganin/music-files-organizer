@@ -30,30 +30,13 @@ impl MusicFile {
             Ok(None)
         }
     }
-
-    pub fn from_tag(
-        tag: Box<dyn Tag>,
-        base_path: &Path,
-        transcode_to_mp4: bool,
-        source_extension: &str,
-        duration: Option<Duration>,
-    ) -> Result<Self> {
-        let target_folder_path = base_path.join(music_folder_path(tag.deref())?);
-        let target_extension = if transcode_to_mp4 {
-            "m4a"
-        } else {
-            source_extension
-        };
-        let target_path = target_folder_path.join(music_file_name(tag.deref(), target_extension)?);
-        Ok(MusicFile {
-            file_path: target_path,
-            tag,
-            duration,
-        })
-    }
 }
 
-fn music_folder_path(tag: &dyn Tag) -> Result<PathBuf> {
+pub fn relative_path_for(tag: &dyn Tag, with_extension: &str) -> Result<PathBuf> {
+    Ok(music_folder_path_for(tag.deref())?.join(music_file_name_for(tag.deref(), with_extension)?))
+}
+
+pub fn music_folder_path_for(tag: &dyn Tag) -> Result<PathBuf> {
     let context = |frame_id: FrameId| format!("No {} to form music folder name", frame_id);
     let album_artist = tag
         .album_artist()
@@ -69,7 +52,7 @@ fn music_folder_path(tag: &dyn Tag) -> Result<PathBuf> {
     Ok(path)
 }
 
-fn music_file_name(tag: &dyn Tag, extension: &str) -> Result<String> {
+pub fn music_file_name_for(tag: &dyn Tag, with_extension: &str) -> Result<String> {
     let context = |frame_id: FrameId| format!("No {} to form music file name", frame_id);
     let track = tag
         .track_number()
@@ -78,17 +61,17 @@ fn music_file_name(tag: &dyn Tag, extension: &str) -> Result<String> {
 
     Ok(sanitize_path(match tag.disc() {
         Some(disc) => format!(
-            "{disc:02}.{track:02}. {title}.{ext}",
+            "{disc:02}.{track:02}. {title}.{extension}",
             disc = disc,
             track = track,
             title = title,
-            ext = extension,
+            extension = with_extension,
         ),
         None => format!(
-            "{track:02}. {title}.{ext}",
+            "{track:02}. {title}.{extension}",
             track = track,
             title = title,
-            ext = extension,
+            extension = with_extension,
         ),
     }))
 }

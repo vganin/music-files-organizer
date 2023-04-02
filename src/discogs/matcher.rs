@@ -1,10 +1,10 @@
-use std::{f64, thread};
+use std::{f64, fs, thread};
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 use std::mem::swap;
 use std::ops::Deref;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
@@ -24,7 +24,6 @@ use crate::console_print;
 use crate::discogs::model::refined;
 use crate::discogs::model::serialized;
 use crate::music_file::MusicFile;
-use crate::util::console::Console;
 use crate::util::console_styleable::ConsoleStyleable;
 use crate::util::path_extensions::PathExtensions;
 use crate::util::string_extensions::StringExtensions;
@@ -33,7 +32,22 @@ pub struct DiscogsMatcher {
     http_client: blocking::Client,
 }
 
+const DISCOGS_TOKEN_FILE_NAME: &str = ".discogs_token";
+
 impl DiscogsMatcher {
+    pub fn with_optional_token(discogs_token: &Option<String>) -> Result<Self> {
+        let discogs_token = match discogs_token {
+            Some(x) => x.to_owned(),
+            None => {
+                let discogs_token_file = Self::get_discogs_token_file_path()
+                    .with_context(|| format!("Supply discogs token with commandline argument (refer to --help) or with the file ~/{}", DISCOGS_TOKEN_FILE_NAME))?;
+                fs::read_to_string(discogs_token_file)?.trim().to_owned()
+            }
+        };
+
+        DiscogsMatcher::new(&discogs_token)
+    }
+
     pub fn new(discogs_token: &str) -> Result<Self> {
         Ok(DiscogsMatcher {
             http_client: blocking::ClientBuilder::new()
@@ -59,6 +73,10 @@ impl DiscogsMatcher {
         );
         Ok(headers)
     }
+
+    fn get_discogs_token_file_path() -> Option<PathBuf> {
+        Some(dirs::home_dir()?.join(DISCOGS_TOKEN_FILE_NAME))
+    }
 }
 
 pub struct DiscogsTrackMatch<'a> {
@@ -78,8 +96,7 @@ impl DiscogsMatcher {
     pub fn match_music_files<'a>(
         &self,
         music_files: impl Iterator<Item = &'a MusicFile>,
-        provided_discogs_release_id: &Option<String>,
-        console: &Console,
+        force_discogs_release_id: &Option<String>,
     ) -> Result<Vec<DiscogsReleaseMatchResult<'a>>> {
         let mut files_grouped_by_parent_path: HashMap<&Path, Vec<&MusicFile>> = HashMap::new();
         for music_file in music_files {
@@ -96,9 +113,8 @@ impl DiscogsMatcher {
             let mut match_result: DiscogsReleaseMatchResult =
                 DiscogsReleaseMatchResult::Unmatched(music_files.clone());
 
-            if provided_discogs_release_id.is_none() {
+            if force_discogs_release_id.is_none() {
                 console_print!(
-                    console,
                     "Matching Discogs for {} – {}",
                     music_files
                         .iter()
@@ -117,8 +133,8 @@ impl DiscogsMatcher {
                 let common_search_params =
                     Self::common_search_params_from_music_files(&music_files);
                 let release_urls = common_search_params.iter().flat_map(|params| {
-                    self.search_master_release(params, console)
-                        .chain(self.search_release(params, console))
+                    self.search_master_release(params)
+                        .chain(self.search_release(params))
                         .take(5) // No more than 5 release fetches per params combinations to give other combinations realistic chances
                 });
 
@@ -132,7 +148,7 @@ impl DiscogsMatcher {
                     }
 
                     let serialized_release: serialized::DiscogsRelease =
-                        self.fetch_by_url(release_url, console)?;
+                        self.fetch_by_url(release_url)?;
                     let refined_release = refined::DiscogsRelease::from(&serialized_release)?;
 
                     // FIXME: clone() is redundant here
@@ -153,7 +169,7 @@ impl DiscogsMatcher {
             }
 
             if let DiscogsReleaseMatchResult::Unmatched(_) = match_result {
-                let mut release_id = provided_discogs_release_id
+                let mut release_id = force_discogs_release_id
                     .as_ref()
                     .map(|v| Self::extract_discogs_id(v).map(|v| v.to_owned()))
                     .transpose()?;
@@ -168,7 +184,7 @@ impl DiscogsMatcher {
                 if let Some(release_id) = release_id {
                     let mut release_id = release_id;
                     loop {
-                        let serialized_release = self.fetch_release_by_id(&release_id, console)?;
+                        let serialized_release = self.fetch_release_by_id(&release_id)?;
                         let refined_release = refined::DiscogsRelease::from(&serialized_release)?;
 
                         // FIXME: clone() is redundant here
@@ -199,9 +215,9 @@ impl DiscogsMatcher {
             }
 
             if let Matched { release, .. } = &match_result {
-                console_print!(console, "Will use {}", release.uri.as_str().path_styled());
+                console_print!("Will use {}", release.uri.as_str().path_styled());
             } else {
-                console_print!(console, "Will use file tags as is");
+                console_print!("Will use file tags as is");
             }
 
             result.push(match_result);
@@ -210,17 +226,11 @@ impl DiscogsMatcher {
         Ok(result)
     }
 
-    pub fn download_cover(
-        &self,
-        url: &str,
-        path: &Path,
-        pb: &ProgressBar,
-        console: &Console,
-    ) -> Result<()> {
-        let mut response = self.get_ok(url, console)?;
+    pub fn download_cover(&self, url: &str, path: &Path, pb: &ProgressBar) -> Result<()> {
+        let mut response = self.get_ok(url)?;
 
         let mut file =
-            &mut ProgressWriter::new(std::fs::File::create(path)?, |bytes| pb.inc(bytes as u64));
+            &mut ProgressWriter::new(fs::File::create(path)?, |bytes| pb.inc(bytes as u64));
 
         pb.set_length(
             response
@@ -279,17 +289,16 @@ impl DiscogsMatcher {
     fn search_master_release<'a>(
         &'a self,
         params: &'a [(&str, String)],
-        console: &'a Console,
     ) -> impl Iterator<Item = Result<String>> + '_ {
         std::iter::once_with(move || {
             let mut search_params: Vec<(&str, String)> = vec![("type", "master".to_owned())];
             search_params.extend_from_slice(params);
-            self.fetch_search_results(search_params, console)
+            self.fetch_search_results(search_params)
         })
         .map_ok(|v| v.results)
         .flatten_ok()
         .map_ok(|v| -> Result<String> {
-            let master: serialized::DiscogsMaster = self.fetch_by_url(v.resource_url, console)?;
+            let master: serialized::DiscogsMaster = self.fetch_by_url(v.resource_url)?;
             Ok(master.main_release_url)
         })
         .flatten()
@@ -298,12 +307,11 @@ impl DiscogsMatcher {
     fn search_release<'a>(
         &'a self,
         params: &'a [(&str, String)],
-        console: &'a Console,
     ) -> impl Iterator<Item = Result<String>> + '_ {
         std::iter::once_with(move || {
             let mut search_params: Vec<(&str, String)> = vec![("type", "release".to_owned())];
             search_params.extend_from_slice(params);
-            self.fetch_search_results(search_params, console)
+            self.fetch_search_results(search_params)
         })
         .map_ok(|v| v.results)
         .flatten_ok()
@@ -346,19 +354,14 @@ impl DiscogsMatcher {
         ]
     }
 
-    fn fetch_release_by_id(
-        &self,
-        release_id: &str,
-        console: &Console,
-    ) -> Result<serialized::DiscogsRelease> {
+    fn fetch_release_by_id(&self, release_id: &str) -> Result<serialized::DiscogsRelease> {
         let url = &format!("https://api.discogs.com/releases/{}", release_id);
-        self.fetch_by_url(url, console)
+        self.fetch_by_url(url)
     }
 
     fn fetch_search_results<I, K, V>(
         &self,
         params: I,
-        console: &Console,
     ) -> Result<serialized::DiscogsSearchResultPage>
     where
         I: IntoIterator,
@@ -367,21 +370,21 @@ impl DiscogsMatcher {
         V: AsRef<str>,
     {
         let url = Url::parse_with_params("https://api.discogs.com/database/search", params)?;
-        self.fetch_by_url(url, console)
+        self.fetch_by_url(url)
     }
 
-    fn fetch_by_url<U, T>(&self, url: U, console: &Console) -> Result<T>
+    fn fetch_by_url<U, T>(&self, url: U) -> Result<T>
     where
         U: IntoUrl + Clone + Display,
         T: DeserializeOwned,
     {
         Ok(serde_json::from_value(
-            self.get_ok(url, console)?.json::<serde_json::Value>()?,
+            self.get_ok(url)?.json::<serde_json::Value>()?,
         )?)
     }
 
-    fn get_ok<T: IntoUrl + Clone + Display>(&self, url: T, console: &Console) -> Result<Response> {
-        console_print!(console, "Fetching {}", (&url).path_styled());
+    fn get_ok<T: IntoUrl + Clone + Display>(&self, url: T) -> Result<Response> {
+        console_print!("Fetching {}", (&url).path_styled());
         loop {
             let response = self.http_client.get(url.clone()).send()?;
             let status = response.status();
@@ -389,7 +392,6 @@ impl DiscogsMatcher {
                 break Ok(response);
             } else if status == StatusCode::TOO_MANY_REQUESTS {
                 console_print!(
-                    console,
                     "{}",
                     "Reached requests limit! Slowing down..."
                         .styled()

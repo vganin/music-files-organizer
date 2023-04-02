@@ -907,6 +907,7 @@ dependencies = [
  "lofty",
  "metaflac",
  "mp4ameta",
+ "once_cell",
  "progress-streams",
  "regex",
  "reqwest",

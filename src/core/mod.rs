@@ -32,20 +32,21 @@ pub enum AllowedChangeType {
     TargetCleanup,
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn work(
-    input_paths: Vec<PathBuf>,
-    output_path: Option<PathBuf>,
-    allowed_change_types: Vec<AllowedChangeType>,
-    allow_questions: bool,
-    chunk_size: Option<usize>,
-    discogs_token: Option<String>,
-    discogs_release_id: Option<String>,
-    force_fsync: bool,
-) -> Result<()> {
-    let discogs_matcher = DiscogsMatcher::with_optional_token(&discogs_token)?;
+pub struct Args {
+    pub input_paths: Vec<PathBuf>,
+    pub output_path: Option<PathBuf>,
+    pub allowed_change_types: Vec<AllowedChangeType>,
+    pub allow_questions: bool,
+    pub chunk_size: Option<usize>,
+    pub discogs_token: Option<String>,
+    pub discogs_release_id: Option<String>,
+    pub force_fsync: bool,
+}
 
-    match &output_path {
+pub fn work(args: Args) -> Result<()> {
+    let discogs_matcher = DiscogsMatcher::with_optional_token(&args.discogs_token)?;
+
+    match &args.output_path {
         Some(output_path) => {
             if !fs::metadata(output_path)?.is_dir() {
                 bail!("Output path is not a directory")
@@ -54,22 +55,25 @@ pub fn work(
         None => {}
     }
 
-    let music_files_chunks = get_music_files_chunks(input_paths, chunk_size);
+    let music_files_chunks = get_music_files_chunks(args.input_paths, args.chunk_size);
 
     for music_files in music_files_chunks {
         let music_files = music_files?;
         let discogs_releases =
-            discogs_matcher.match_music_files(music_files.iter(), &discogs_release_id)?;
+            discogs_matcher.match_music_files(music_files.iter(), &args.discogs_release_id)?;
 
-        let mut changes =
-            calculate_changes(&discogs_releases, &output_path, &allowed_change_types)?;
+        let mut changes = calculate_changes(
+            &discogs_releases,
+            &args.output_path,
+            &args.allowed_change_types,
+        )?;
 
         if changes.music_files.is_empty() && changes.covers.is_empty() && changes.covers.is_empty()
         {
             continue;
         }
 
-        if allow_questions {
+        if args.allow_questions {
             loop {
                 if Confirm::new()
                     .with_prompt("Do you want to review changes?")
@@ -87,7 +91,7 @@ pub fn work(
                         .wait_for_newline(true)
                         .interact()?
                     {
-                        changes = edit_changes(changes, &output_path)?;
+                        changes = edit_changes(changes, &args.output_path)?;
                     } else {
                         break;
                     }
@@ -97,7 +101,7 @@ pub fn work(
             }
         }
 
-        if !allow_questions
+        if !args.allow_questions
             || Confirm::new()
                 .with_prompt("Do you want to make changes?")
                 .default(true)
@@ -108,7 +112,7 @@ pub fn work(
             write_music_files(&changes.music_files)?;
             download_covers(&discogs_matcher, &changes.covers)?;
             cleanup(&changes.cleanups)?;
-            if force_fsync {
+            if args.force_fsync {
                 fsync(&changes)?;
             }
         }

@@ -141,8 +141,9 @@ fn get_music_files_chunks(
         .map(|chunk| chunk.collect_vec())
         .collect_vec()
         .into_iter()
-        .map(move |chunk| {
-            chunk
+        .map(|chunk| {
+            let pb = console::get_mut().new_default_spinner();
+            let result = chunk
                 .into_iter()
                 .flat_map(|e| {
                     WalkDir::new(e.path())
@@ -151,9 +152,14 @@ fn get_music_files_chunks(
                         .filter_map(Result::ok)
                 })
                 .filter(|e| !e.file_type().is_dir())
-                .map(|file| MusicFile::from_path(file.path()))
+                .map(|file| {
+                    pb_set_message!(pb, "Analyzing {}", file.path().display().path_styled());
+                    MusicFile::from_path(file.path())
+                })
                 .flatten_ok()
-                .try_collect::<MusicFile, Vec<MusicFile>, _>()
+                .try_collect::<MusicFile, Vec<MusicFile>, _>();
+            pb.finish_and_clear();
+            result
         })
 }
 

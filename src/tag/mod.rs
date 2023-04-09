@@ -4,7 +4,6 @@ use std::io::{Seek, Write};
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use dyn_clone::DynClone;
 
 use frame::*;
 
@@ -15,7 +14,7 @@ pub mod frame;
 mod id3;
 mod m4a;
 
-pub trait Tag: DynClone {
+pub trait Tag: TagClone {
     fn frame_ids(&self) -> Vec<FrameId>;
 
     fn title(&self) -> Option<&str>;
@@ -56,7 +55,26 @@ pub trait Tag: DynClone {
     fn write_to(&self, file: &mut File) -> Result<()>;
 }
 
-impl dyn Tag + '_ {
+pub trait TagClone {
+    fn clone_box(&self) -> Box<dyn Tag>;
+}
+
+impl<T> TagClone for T
+where
+    T: 'static + Tag + Clone,
+{
+    fn clone_box(&self) -> Box<dyn Tag> {
+        Box::new(self.clone())
+    }
+}
+
+impl Clone for Box<dyn Tag> {
+    fn clone(&self) -> Box<dyn Tag> {
+        self.clone_box()
+    }
+}
+
+impl dyn Tag {
     pub fn frame_content(&self, id: &FrameId) -> Option<FrameContent> {
         match id {
             FrameId::Title => self.title().map(|v| FrameContent::Str(v.to_owned())),
@@ -121,7 +139,8 @@ impl dyn Tag + '_ {
         };
     }
 
-    pub fn set_from(&mut self, other: &dyn Tag) -> Result<()> {
+    #[allow(clippy::borrowed_box)]
+    pub fn set_from(&mut self, other: &Box<dyn Tag>) -> Result<()> {
         self.clear();
 
         for frame_id in other.frame_ids() {

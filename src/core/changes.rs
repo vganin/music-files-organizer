@@ -7,14 +7,13 @@ use std::str::FromStr;
 
 use anyhow::{Context, Result};
 use dialoguer::Editor;
-use dyn_clone::clone_box;
 use itertools::Itertools;
 use regex::Regex;
 use reqwest::Url;
 
 use crate::console_print;
 use crate::core::AllowedChangeType;
-use crate::discogs::create_tag::create_tag_from_discogs_data;
+use crate::discogs::create_tag::{create_tag_from_discogs_data, strip_redundant_fields};
 use crate::discogs::matcher::DiscogsReleaseMatchResult;
 use crate::discogs::matcher::DiscogsReleaseMatchResult::{Matched, Unmatched};
 use crate::discogs::model::refined::DiscogsRelease;
@@ -106,7 +105,7 @@ pub fn edit_changes<'a>(
 
         for music_file in changes.music_files {
             let old_tag = &music_file.target.tag;
-            let mut new_tag = clone_box(old_tag.deref());
+            let mut new_tag = old_tag.clone();
             new_tag.clear();
 
             loop {
@@ -295,7 +294,7 @@ fn get_file_changes<'a>(
         let target_tag = if let Some((discogs_track, discogs_release)) = discogs_info {
             create_tag_from_discogs_data(source_tag, discogs_track, discogs_release)?
         } else {
-            clone_box(music_file.tag.deref())
+            strip_redundant_fields(source_tag)?
         };
         let source_path = &music_file.file_path;
         let source_extension = source_path.extension_or_empty();

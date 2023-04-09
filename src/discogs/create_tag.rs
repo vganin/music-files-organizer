@@ -1,19 +1,21 @@
-use std::ops::Deref;
+use std::borrow::ToOwned;
+use std::string::ToString;
 
 use anyhow::Result;
-use dyn_clone::clone_box;
 use itertools::Itertools;
+use once_cell::sync::Lazy;
 
 use crate::discogs::model::refined::{DiscogsRelease, DiscogsTrack};
+use crate::tag::frame::FrameId;
 use crate::tag::Tag;
 
-#[allow(clippy::borrowed_box)] // FIXME: Fix reference to Box
+#[allow(clippy::borrowed_box)]
 pub fn create_tag_from_discogs_data(
     original_tag: &Box<dyn Tag>, // FIXME: Can't create new tag without "template" for now
     discogs_track: &DiscogsTrack,
     discogs_release: &DiscogsRelease,
 ) -> Result<Box<dyn Tag>> {
-    let mut new_tag = clone_box(original_tag.deref());
+    let mut new_tag = original_tag.clone();
     new_tag.clear();
 
     new_tag.set_title(Some(discogs_track.title.to_owned()));
@@ -75,4 +77,33 @@ pub fn create_tag_from_discogs_data(
     Ok(new_tag)
 }
 
+#[allow(clippy::borrowed_box)]
+pub fn strip_redundant_fields(tag: &Box<dyn Tag>) -> Result<Box<dyn Tag>> {
+    let mut new_tag = tag.clone();
+    new_tag.clear();
+
+    for frame_id in ALLOWED_FRAMES.iter() {
+        new_tag.set_frame(frame_id, tag.frame_content(frame_id))?;
+    }
+
+    Ok(new_tag)
+}
+
 const DISCOGS_RELEASE_TAG: &str = "DISCOGS_RELEASE";
+static ALLOWED_FRAMES: Lazy<Vec<FrameId>> = Lazy::new(|| {
+    vec![
+        FrameId::Title,
+        FrameId::Album,
+        FrameId::AlbumArtist,
+        FrameId::Artist,
+        FrameId::Year,
+        FrameId::Track,
+        FrameId::TotalTracks,
+        FrameId::Disc,
+        FrameId::TotalDiscs,
+        FrameId::Genre,
+        FrameId::CustomText {
+            key: DISCOGS_RELEASE_TAG.to_string(),
+        },
+    ]
+});

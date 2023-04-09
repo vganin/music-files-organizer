@@ -203,7 +203,7 @@ fn write_music_files(changes: &Vec<MusicFileChange>) -> Result<()> {
                     named_temp_file_path.display().path_styled()
                 )
             })?;
-            tag.set_from(target_tag.as_ref())?;
+            tag.set_from(target_tag)?;
             tag.write_to(named_temp_file.as_file_mut())?;
             named_temp_file.into_file()
         } else {

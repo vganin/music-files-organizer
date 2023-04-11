@@ -2,11 +2,13 @@ use std::collections::HashMap;
 use std::iter;
 use std::time::Duration;
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use itertools::Itertools;
 use regex::Regex;
 
+use crate::console_print;
 use crate::discogs::model::serialized;
+use crate::util::console_styleable::ConsoleStyleable;
 
 #[derive(Clone)]
 pub struct DiscogsRelease {
@@ -88,7 +90,10 @@ impl DiscogsRelease {
                 DiscogsTrack::disc_position(serialized_track).ok().flatten()
             {
                 if used_indexing {
-                    bail!("Tried to use parsed position while used indexing already")
+                    console_print!(
+                        "{}",
+                        "Tried to use parsed position while used indexing already".warning_styled()
+                    )
                 } else {
                     used_parsed_position = true;
                 }
@@ -99,7 +104,10 @@ impl DiscogsRelease {
                 }
             } else {
                 if used_parsed_position {
-                    bail!("Tried to use indexing while used parsed position already")
+                    console_print!(
+                        "{}",
+                        "Tried to use indexing while used parsed position already".warning_styled()
+                    )
                 } else {
                     used_indexing = true;
                 }

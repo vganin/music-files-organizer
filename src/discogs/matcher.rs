@@ -155,6 +155,7 @@ impl DiscogsMatcher {
                     match Self::match_release_with_music_files(
                         refined_release.clone(),
                         &music_files,
+                        false,
                     ) {
                         None => continue,
                         Some(tracks_matching) => {
@@ -191,6 +192,7 @@ impl DiscogsMatcher {
                         match Self::match_release_with_music_files(
                             refined_release.clone(),
                             &music_files,
+                            true,
                         ) {
                             None => {
                                 match Self::ask_for_release_id(
@@ -247,6 +249,7 @@ impl DiscogsMatcher {
     fn match_release_with_music_files<'a>(
         release: refined::DiscogsRelease,
         music_files: &Vec<&'a MusicFile>,
+        simplified_match: bool,
     ) -> Option<Vec<DiscogsTrackMatch<'a>>> {
         let track_list = release.tracks;
 
@@ -272,7 +275,11 @@ impl DiscogsMatcher {
                     if duration2 < duration1 { swap(&mut duration1, &mut duration2); };
                     duration2 - duration1 < DURATION_DIFF_THRESHOLD
                 };
-                (title_matched() && duration_matched()) || (title_matched() && disc_position_matched())
+                if simplified_match {
+                    disc_position_matched()
+                } else {
+                    (title_matched() && duration_matched()) || (title_matched() && disc_position_matched())
+                }
             }) else {
                 return None;
             };

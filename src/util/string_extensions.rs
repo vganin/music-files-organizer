@@ -6,6 +6,7 @@ use unidecode::unidecode;
 pub trait StringExtensions {
     fn simplify(&self) -> String;
     fn is_similar(&self, other: &str) -> bool;
+    fn similarity_score(&self, other: &str) -> f64;
     fn remove_special_chars(&self) -> String;
     fn remove_excessive_whitespaces(&self) -> String;
 }
@@ -34,6 +35,12 @@ impl StringExtensions for str {
                     .is_some()
         };
         strings_are_similar() || strings_are_prefixes_of_each_other()
+    }
+
+    fn similarity_score(&self, other: &str) -> f64 {
+        let self_simplified = self.simplify();
+        let other_simplified = other.simplify();
+        normalized_damerau_levenshtein(&self_simplified, &other_simplified)
     }
 
     fn remove_special_chars(&self) -> String {

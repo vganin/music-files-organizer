@@ -265,7 +265,16 @@ impl DiscogsMatcher {
                 .title()
                 .or_else(|| music_file.file_path.file_stem().and_then(|v| v.to_str()))
                 .unwrap_or_default();
-            let Some(track) = track_list.iter().find(|track| {
+            let sorted_by_title_similarity = track_list
+                .iter()
+                .sorted_by(|a, b| {
+                    track_title
+                        .similarity_score(&b.title)
+                        .partial_cmp(&track_title.similarity_score(&a.title))
+                        .unwrap()
+                })
+                .collect_vec();
+            let Some(track) = sorted_by_title_similarity.iter().find(|track| {
                 let disc_position_matched = || tag.disc().unwrap_or(1) == track.disc && tag.track_number() == Some(track.position);
                 let title_matched = || track_title.is_similar(&track.title);
                 let duration_matched = || {

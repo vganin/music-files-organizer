@@ -3,14 +3,13 @@ use std::fs::File;
 use std::io::Seek;
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use dialoguer::Confirm;
 use itertools::Itertools;
 use progress_streams::{ProgressReader, ProgressWriter};
-use tempfile::NamedTempFile;
 use walkdir::WalkDir;
 
-use crate::{pb_finish_with_message, pb_set_message, tag, util};
+use crate::{pb_finish_with_message, pb_set_message, util};
 use crate::core::changes::{
     calculate_changes, ChangeList, Cleanup, CoverChange, edit_changes, MusicFileChange,
     print_changes_details,
@@ -20,7 +19,6 @@ use crate::music_file::MusicFile;
 use crate::util::console;
 use crate::util::console_styleable::ConsoleStyleable;
 use crate::util::path_extensions::PathExtensions;
-use crate::util::transcode;
 
 mod changes;
 
@@ -191,22 +189,7 @@ fn write_music_files(changes: &Vec<MusicFileChange>) -> Result<()> {
 
         fs::create_dir_all(target_path.parent_or_empty())?;
 
-        let mut temp_file = if change.is_transcode {
-            let mut named_temp_file = NamedTempFile::new()?;
-            let named_temp_file_path = named_temp_file.path();
-            transcode::to_mp4(source_path, named_temp_file_path, |bytes| {
-                pb.inc(bytes as u64 / 2)
-            });
-            let mut tag = tag::read_from_path(named_temp_file_path, "m4a")?.with_context(|| {
-                format!(
-                    "Failed to read from temp file {}",
-                    named_temp_file_path.display().path_styled()
-                )
-            })?;
-            tag.set_from(target_tag)?;
-            tag.write_to(named_temp_file.as_file_mut())?;
-            named_temp_file.into_file()
-        } else {
+        let mut temp_file = {
             let mut source_file =
                 ProgressReader::new(File::open(source_path)?, |bytes| pb.inc(bytes as u64 / 2));
             let mut temp_file = tempfile::tempfile()?;

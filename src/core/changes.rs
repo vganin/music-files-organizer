@@ -31,7 +31,6 @@ pub struct ChangeList<'a> {
 pub struct MusicFileChange<'a> {
     pub source: &'a MusicFile,
     pub target: MusicFile,
-    pub is_transcode: bool,
     pub source_file_length: u64,
     discogs_release: Option<&'a DiscogsRelease>,
 }
@@ -191,13 +190,7 @@ pub fn print_changes_details(changes: &ChangeList) {
             console_print!(
                 "{:02}. {} {}",
                 step_number,
-                if change.is_transcode {
-                    "Transcode"
-                } else {
-                    "Update"
-                }
-                .styled()
-                .yellow(),
+                "Update".styled().yellow(),
                 source_file_path.file_name_or_empty().path_styled(),
             );
         } else {
@@ -206,13 +199,7 @@ pub fn print_changes_details(changes: &ChangeList) {
             console_print!(
                 "{:02}. {} {} → {}",
                 step_number,
-                if change.is_transcode {
-                    "Transcode"
-                } else {
-                    "Copy"
-                }
-                .styled()
-                .green(),
+                "Copy".styled().green(),
                 source_file_path
                     .strip_prefix_or_same(&common_file_prefix)
                     .display()
@@ -298,11 +285,7 @@ fn get_file_changes<'a>(
         };
         let source_path = &music_file.file_path;
         let source_extension = source_path.extension_or_empty();
-        let target_extension = if source_extension == "flac" {
-            "m4a"
-        } else {
-            source_extension
-        };
+        let target_extension = source_extension;
         let source_file_length = fs::metadata(source_path)?.len();
         let file_path = if let Some(output_path) = output_path {
             output_path.join(relative_path_for(target_tag.deref(), target_extension)?)
@@ -313,7 +296,6 @@ fn get_file_changes<'a>(
         };
         let duration = music_file.duration;
         let discogs_release = discogs_info.map(|v| v.1);
-        let is_transcode = source_extension != target_extension;
         let music_file_change = MusicFileChange {
             source: music_file,
             target: MusicFile {
@@ -321,7 +303,6 @@ fn get_file_changes<'a>(
                 tag: target_tag,
                 duration,
             },
-            is_transcode,
             source_file_length,
             discogs_release,
         };

@@ -4,4 +4,3 @@ pub mod console_styleable;
 pub mod fsync;
 pub mod path_extensions;
 pub mod string_extensions;
-pub mod transcode;

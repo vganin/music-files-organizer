@@ -9,10 +9,9 @@ use itertools::Itertools;
 use progress_streams::{ProgressReader, ProgressWriter};
 use walkdir::WalkDir;
 
-use crate::{pb_finish_with_message, pb_set_message, util};
+use crate::{pb_finish_with_message, pb_set_message};
 use crate::core::changes::{
-    calculate_changes, ChangeList, Cleanup, CoverChange, edit_changes, MusicFileChange,
-    print_changes_details,
+    calculate_changes, Cleanup, CoverChange, edit_changes, MusicFileChange, print_changes_details,
 };
 use crate::discogs::matcher::DiscogsMatcher;
 use crate::music_file::MusicFile;
@@ -38,7 +37,6 @@ pub struct Args {
     pub chunk_size: Option<usize>,
     pub discogs_token: Option<String>,
     pub discogs_release_id: Option<String>,
-    pub force_fsync: bool,
 }
 
 pub fn work(args: Args) -> Result<()> {
@@ -110,9 +108,6 @@ pub fn work(args: Args) -> Result<()> {
             write_music_files(&changes.music_files)?;
             download_covers(&discogs_matcher, &changes.covers)?;
             cleanup(&changes.cleanups)?;
-            if args.force_fsync {
-                fsync(&changes)?;
-            }
         }
     }
 
@@ -275,23 +270,6 @@ fn cleanup(cleanups: &[Cleanup]) -> Result<()> {
                 break;
             }
         }
-    }
-
-    Ok(())
-}
-
-fn fsync(changes: &ChangeList) -> Result<()> {
-    let folders = changes
-        .music_files
-        .iter()
-        .map(|v| &v.target.file_path)
-        .chain(changes.covers.iter().map(|v| &v.path))
-        .map(|v| v.parent_or_empty())
-        .unique()
-        .collect_vec();
-
-    for folder in folders {
-        util::fsync::fsync(folder)?;
     }
 
     Ok(())

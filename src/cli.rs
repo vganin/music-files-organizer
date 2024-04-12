@@ -18,7 +18,6 @@ pub enum Command {
     GenerateCompletions(GenerateCompletionsArgs),
     Import(ImportArgs),
     AddCovers(AddCoversArguments),
-    Fsync(FsyncArguments),
 }
 
 #[derive(Args)]
@@ -40,9 +39,6 @@ pub struct ImportArgs {
 
     #[clap(long, default_value_t = true, action = clap::ArgAction::Set)]
     pub clean_source_folders: bool,
-
-    #[clap(long, default_value_t = true, action = clap::ArgAction::Set)]
-    pub fsync: bool,
 
     #[clap(long)]
     pub chunk_size: Option<usize>,

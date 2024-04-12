@@ -14,6 +14,5 @@ pub fn add_covers(args: AddCoversArguments, discogs_token: Option<String>) -> Re
         chunk_size: Some(1),
         discogs_token,
         discogs_release_id: None,
-        force_fsync: false,
     })
 }

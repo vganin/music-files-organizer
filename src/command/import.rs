@@ -14,6 +14,5 @@ pub fn import(args: ImportArgs, discogs_token: Option<String>) -> Result<()> {
         chunk_size: args.chunk_size,
         discogs_token,
         discogs_release_id: args.discogs_release_id,
-        force_fsync: args.fsync,
     })
 }

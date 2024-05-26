@@ -52,9 +52,3 @@ pub struct AddCoversArguments {
     #[clap()]
     pub to: PathBuf,
 }
-
-#[derive(Args)]
-pub struct FsyncArguments {
-    #[clap()]
-    pub path: PathBuf,
-}

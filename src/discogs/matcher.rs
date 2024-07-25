@@ -147,8 +147,10 @@ impl DiscogsMatcher {
                         checked_release_urls.insert(release_url.clone());
                     }
 
-                    let serialized_release: serialized::DiscogsRelease =
-                        self.fetch_by_url(release_url)?;
+                    let Ok(serialized_release) = self.fetch_by_url(release_url) else {
+                        continue
+                    };
+
                     let refined_release = refined::DiscogsRelease::from(&serialized_release)?;
 
                     // FIXME: clone() is redundant here

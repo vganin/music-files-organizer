@@ -1,4 +1,3 @@
-use std::{f64, fs, thread};
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
@@ -6,6 +5,7 @@ use std::mem::swap;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use std::{f64, fs, thread};
 
 use anyhow::{bail, Context, Result};
 use dialoguer::{Input, Select};
@@ -13,9 +13,9 @@ use indicatif::ProgressBar;
 use itertools::Itertools;
 use progress_streams::ProgressWriter;
 use regex::Regex;
-use reqwest::{blocking, IntoUrl, StatusCode, Url};
 use reqwest::blocking::Response;
-use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, USER_AGENT};
+use reqwest::{blocking, IntoUrl, StatusCode, Url};
 use serde::de::DeserializeOwned;
 
 use DiscogsReleaseMatchResult::Matched;
@@ -171,7 +171,7 @@ impl DiscogsMatcher {
                 }
             }
 
-            if let DiscogsReleaseMatchResult::Unmatched(_) = match_result {
+            if !matches!(force_discogs_release_id.as_deref(), Some("none")) && matches!(match_result, DiscogsReleaseMatchResult::Unmatched(_)) {
                 let mut release_id = force_discogs_release_id
                     .as_ref()
                     .map(|v| Self::extract_discogs_id(v).map(|v| v.to_owned()))

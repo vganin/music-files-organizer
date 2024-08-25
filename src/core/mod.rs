@@ -1,7 +1,7 @@
-use std::{fs, io};
 use std::fs::File;
 use std::io::Seek;
 use std::path::{Path, PathBuf};
+use std::{fs, io};
 
 use anyhow::{bail, Result};
 use dialoguer::Confirm;
@@ -9,15 +9,15 @@ use itertools::Itertools;
 use progress_streams::{ProgressReader, ProgressWriter};
 use walkdir::WalkDir;
 
-use crate::{pb_finish_with_message, pb_set_message};
 use crate::core::changes::{
-    calculate_changes, Cleanup, CoverChange, edit_changes, MusicFileChange, print_changes_details,
+    calculate_changes, edit_changes, print_changes_details, Cleanup, CoverChange, MusicFileChange,
 };
 use crate::discogs::matcher::DiscogsMatcher;
 use crate::music_file::MusicFile;
 use crate::util::console;
 use crate::util::console_styleable::ConsoleStyleable;
 use crate::util::path_extensions::PathExtensions;
+use crate::{pb_finish_with_message, pb_set_message};
 
 mod changes;
 
@@ -133,6 +133,7 @@ fn get_music_files_chunks(
         .flatten_ok()
         .flatten_ok()
         .filter_map(Result::ok)
+        .sorted_by_key(|v| v.file_name().to_owned())
         .chunks(chunk_size.unwrap_or(usize::MAX))
         .into_iter()
         .map(|chunk| chunk.collect_vec())

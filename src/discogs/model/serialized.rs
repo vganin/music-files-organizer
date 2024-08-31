@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize)]
 pub struct DiscogsMaster {
     pub main_release_url: String,
+    pub year: i32,
 }
 
 #[derive(Serialize, Deserialize)]

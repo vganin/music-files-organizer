@@ -132,15 +132,15 @@ impl DiscogsMatcher {
 
                 let common_search_params =
                     Self::common_search_params_from_music_files(&music_files);
-                let release_urls = common_search_params.iter().flat_map(|params| {
+                let release_infos = common_search_params.iter().flat_map(|params| {
                     self.search_master_release(params)
                         .chain(self.search_release(params))
                         .take(5) // No more than 5 release fetches per params combinations to give other combinations realistic chances
                 });
 
                 let mut checked_release_urls = HashSet::new();
-                for release_url in release_urls {
-                    let release_url = release_url?;
+                for release_info in release_infos {
+                    let (release_url, master) = release_info?;
                     if checked_release_urls.contains(&release_url) {
                         continue;
                     } else {
@@ -151,7 +151,7 @@ impl DiscogsMatcher {
                         continue
                     };
 
-                    let refined_release = refined::DiscogsRelease::from(&serialized_release)?;
+                    let refined_release = refined::DiscogsRelease::from(&serialized_release, master)?;
 
                     // FIXME: clone() is redundant here
                     match Self::match_release_with_music_files(
@@ -188,7 +188,7 @@ impl DiscogsMatcher {
                     let mut release_id = release_id;
                     loop {
                         let serialized_release = self.fetch_release_by_id(&release_id)?;
-                        let refined_release = refined::DiscogsRelease::from(&serialized_release)?;
+                        let refined_release = refined::DiscogsRelease::from(&serialized_release, None)?;
 
                         // FIXME: clone() is redundant here
                         match Self::match_release_with_music_files(
@@ -307,7 +307,7 @@ impl DiscogsMatcher {
     fn search_master_release<'a>(
         &'a self,
         params: &'a [(&str, String)],
-    ) -> impl Iterator<Item = Result<String>> + '_ {
+    ) -> impl Iterator<Item=Result<(String, Option<serialized::DiscogsMaster>)>> + '_ {
         std::iter::once_with(move || {
             let mut search_params: Vec<(&str, String)> = vec![("type", "master".to_owned())];
             search_params.extend_from_slice(params);
@@ -315,9 +315,9 @@ impl DiscogsMatcher {
         })
         .map_ok(|v| v.results)
         .flatten_ok()
-        .map_ok(|v| -> Result<String> {
+            .map_ok(|v| -> Result<(String, Option<serialized::DiscogsMaster>)> {
             let master: serialized::DiscogsMaster = self.fetch_by_url(v.resource_url)?;
-            Ok(master.main_release_url)
+                Ok((master.main_release_url.to_owned(), Some(master)))
         })
         .flatten()
     }
@@ -325,7 +325,7 @@ impl DiscogsMatcher {
     fn search_release<'a>(
         &'a self,
         params: &'a [(&str, String)],
-    ) -> impl Iterator<Item = Result<String>> + '_ {
+    ) -> impl Iterator<Item=Result<(String, Option<serialized::DiscogsMaster>)>> + '_ {
         std::iter::once_with(move || {
             let mut search_params: Vec<(&str, String)> = vec![("type", "release".to_owned())];
             search_params.extend_from_slice(params);
@@ -333,7 +333,7 @@ impl DiscogsMatcher {
         })
         .map_ok(|v| v.results)
         .flatten_ok()
-        .map_ok(|v| v.resource_url)
+            .map_ok(|v| (v.resource_url, None))
     }
 
     fn common_search_params_from_music_files(

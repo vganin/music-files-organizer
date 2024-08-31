@@ -43,18 +43,18 @@ pub struct DiscogsArtist {
 }
 
 impl DiscogsRelease {
-    pub fn from(serialized: &serialized::DiscogsRelease) -> Result<DiscogsRelease> {
-        let tracks = Self::tracks(serialized)?;
+    pub fn from(serialized_release: &serialized::DiscogsRelease, serialized_master: Option<serialized::DiscogsMaster>) -> Result<DiscogsRelease> {
+        let tracks = Self::tracks(serialized_release)?;
         let disc_to_total_tracks = Self::disc_to_total_tracks(&tracks);
         Ok(DiscogsRelease {
-            uri: serialized.uri.clone(),
-            title: Self::title(serialized),
-            year: serialized.year,
-            styles: serialized.styles.clone(),
-            image: Self::image(serialized),
+            uri: serialized_release.uri.clone(),
+            title: Self::title(serialized_release),
+            year: serialized_master.map(|v| v.year).unwrap_or_else(|| serialized_release.year),
+            styles: serialized_release.styles.clone(),
+            image: Self::image(serialized_release),
             tracks,
             disc_to_total_tracks,
-            artists: serialized
+            artists: serialized_release
                 .artists
                 .iter()
                 .map(DiscogsArtist::from)
